@@ -42,6 +42,7 @@ const int interval = 15000;
 int lastTelegram = -15000;
 const int RTSpin = 5;
 
+byte bufferIn[768];
 int readLength;
 char receivedCRC[5];
 
