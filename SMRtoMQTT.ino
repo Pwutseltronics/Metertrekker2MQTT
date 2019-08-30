@@ -55,6 +55,8 @@ void setup()
 {
   Serial.begin(115200);
   Serial.setTimeout(100);
+  pinMode(RTSpin, OUTPUT);
+  digitalWrite(RTSpin, LOW);
 
   setupWifi();
   client.setServer(mqttServ, mqttPort);
