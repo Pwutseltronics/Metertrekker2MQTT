@@ -42,16 +42,16 @@ const int interval = 15000;
 int lastTelegram = -15000;
 const int RTSpin = 5;
 
-// char bufferIn[768];
-// int readLength;
-// char receivedCRC[5];
+int readLength;
+char receivedCRC[5];
 
-byte bufferIn[640] = "/ISK5\\2M550E-1012\r\n\r\n1-3:0.2.8(50)\r\n0-0:1.0.0(190827155511S)\r\n0-0:96.1.1(4D455445525F53455249414C235F484558)\r\n1-0:1.8.1(000057.460*kWh)\r\n1-0:1.8.2(000037.300*kWh)\r\n1-0:2.8.1(000000.000*kWh)\r\n1-0:2.8.2(000000.000*kWh)\r\n0-0:96.14.0(0002)\r\n1-0:1.7.0(00.498*kW)\r\n1-0:2.7.0(00.000*kW)\r\n0-0:96.7.21(00008)\r\n0-0:96.7.9(00002)\r\n1-0:99.97.0()\r\n1-0:32.32.0(00005)\r\n1-0:32.36.0(00001)\r\n0-0:96.13.0()\r\n1-0:32.7.0(235.4*V)\r\n1-0:31.7.0(002*A)\r\n1-0:21.7.0(00.454*kW)\r\n1-0:22.7.0(00.000*kW)\r\n0-1:24.1.0(003)\r\n0-1:96.1.0(4D455445525F53455249414C235F484558)\r\n0-1:24.2.1(190827155507S)(00004.380*m3)\r\n!";
-int readLength = strlen((char*)bufferIn);
-char receivedCRC[5] = "ECDF";
+// byte bufferIn[768] = "/ISK5\\2M550E-1012\r\n\r\n1-3:0.2.8(50)\r\n0-0:1.0.0(190827155511S)\r\n0-0:96.1.1(4D455445525F53455249414C235F484558)\r\n1-0:1.8.1(000057.460*kWh)\r\n1-0:1.8.2(000037.300*kWh)\r\n1-0:2.8.1(000000.000*kWh)\r\n1-0:2.8.2(000000.000*kWh)\r\n0-0:96.14.0(0002)\r\n1-0:1.7.0(00.498*kW)\r\n1-0:2.7.0(00.000*kW)\r\n0-0:96.7.21(00008)\r\n0-0:96.7.9(00002)\r\n1-0:99.97.0()\r\n1-0:32.32.0(00005)\r\n1-0:32.36.0(00001)\r\n0-0:96.13.0()\r\n1-0:32.7.0(235.4*V)\r\n1-0:31.7.0(002*A)\r\n1-0:21.7.0(00.454*kW)\r\n1-0:22.7.0(00.000*kW)\r\n0-1:24.1.0(003)\r\n0-1:96.1.0(4D455445525F53455249414C235F484558)\r\n0-1:24.2.1(190827155507S)(00004.380*m3)\r\n!";
+// int readLength = strlen((char*)bufferIn);
+// char receivedCRC[5] = "ECDF";
 
 
-void setup() {
+void setup()
+{
   Serial.begin(115200);
   Serial.setTimeout(100);
 
@@ -60,7 +60,8 @@ void setup() {
   // client.setCallback(callback);
 }
 
-void loop() {
+void loop()
+{
   // WiFi and MQTT stuff
   if (!client.connected()) {
     reconnect();
@@ -69,11 +70,11 @@ void loop() {
 
   if (millis() - lastTelegram > interval) {
     if (Serial.available() > 0) {     // check for incoming serial data
-      while (Serial.available() > 0)  Serial.read();
-      // if (Serial.peek() == '/') {     // check for telegram header
-        // readLength = Serial.readBytesUntil('!', bufferIn, 766);
-        // bufferIn[readLength++] = '!';
-        // bufferIn[readLength] = 0;
+      // while (Serial.available() > 0)  Serial.read();
+      if (Serial.peek() == '/') {     // check for telegram header
+        readLength = Serial.readBytesUntil('!', bufferIn, 766);
+        bufferIn[readLength++] = '!';
+        bufferIn[readLength] = 0;
 
         Serial.println("Telegram received!");
 
@@ -81,8 +82,8 @@ void loop() {
         Serial.println(readLength);
         // Serial.println(bufferIn);
 
-        // Serial.readBytes(receivedCRC, 4);
-        // receivedCRC[4] = 0;
+        Serial.readBytes(receivedCRC, 4);
+        receivedCRC[4] = 0;
         Serial.print("read CRC: ");
         Serial.println(receivedCRC);
 
@@ -98,7 +99,9 @@ void loop() {
         }
 
         Serial.println();
-      // } else Serial.read();
+
+      } else Serial.read();
+
     } else {
       requestTelegram();
 
@@ -350,7 +353,8 @@ void parseTelegram(char* telegram)
 
 }
 
-void setupWifi() {
+void setupWifi()
+{
   delay(10);
   // We start by connecting to a WiFi network
   Serial.println();
@@ -371,7 +375,8 @@ void setupWifi() {
   Serial.println(WiFi.localIP());
 }
 
-void reconnect() {
+void reconnect()
+{
   int connLoseMillis = millis();
   // Loop until we're reconnected
   while (!client.connected()) {
