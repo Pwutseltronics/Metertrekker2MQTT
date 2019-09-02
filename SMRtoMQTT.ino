@@ -45,6 +45,14 @@ metricDef metricDefs[] = {
   { "1-0:22.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L1_redelivery",       "L1 redelivery power" },
   { "1-0:32.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/voltage/L1",                "L1 voltage" },
   { "1-0:31.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/current/L1",                "L1 current" },
+  // { "1-0:41.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L2",                  "L2 power" },
+  // { "1-0:42.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L2_redelivery",       "L2 redelivery power" },
+  // { "1-0:52.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/voltage/L2",                "L2 voltage" },
+  // { "1-0:51.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/current/L2",                "L2 current" },
+  // { "1-0:61.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L3",                  "L3 power" },
+  // { "1-0:62.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L3_redelivery",       "L3 redelivery power" },
+  // { "1-0:72.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/voltage/L3",                "L3 voltage" },
+  // { "1-0:71.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/current/L3",                "L3 current" },
 
   { "0-1:24.1.0",  METRIC_TYPE_BARE,      "",   "gas meter device type" },
   { "0-1:96.1.0",  METRIC_TYPE_META_TEXT, "",   "gas meter serial number" },
@@ -55,7 +63,11 @@ metricDef metricDefs[] = {
   { "0-0:96.7.9",  METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/powerfailures_long",   "long power failures" },
   { "1-0:99.97.0", METRIC_TYPE_OTHER, "whiskeygrid/energy/mains/report/powerfailure_details", "power failure event log" },
   { "1-0:32.32.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_sags/L1",      "L1 voltage sags" },
+  // { "1-0:52.32.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_sags/L2",      "L2 voltage sags" },
+  // { "1-0:72.32.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_sags/L3",      "L3 voltage sags" },
   { "1-0:32.36.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_swells/L1",    "L1 voltage swells" },
+  // { "1-0:52.36.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_swells/L2",    "L2 voltage swells" },
+  // { "1-0:72.36.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_swells/L3",    "L3 voltage swells" },
 
   { "0-0:96.13.0", METRIC_TYPE_TEXT,  "whiskeygrid/energy/mains/message",   "text message" }  // text message
 };
@@ -186,6 +198,7 @@ void parseTelegram(char* telegram)
   int i = 0;
   char *lineptr;
   String line, ident, value, tmpValue, timestamp, gasTimestamp;
+  bool timestampDST, gasTimestampDST;
   byte hexbuf[3];
   metricDef* metric;
   bool allowPublish;
@@ -231,6 +244,7 @@ void parseTelegram(char* telegram)
 
             case METRIC_TYPE_GAS:
               gasTimestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')') - 1);
+              gasTimestampDST = line.charAt(line.indexOf(')') - 1) == 'S';
               Serial.print("\t@{" + gasTimestamp + "}");
 
               allowPublish = gasTimestamp > lastGasTimestamp;
@@ -260,6 +274,7 @@ void parseTelegram(char* telegram)
 
               } else if (strcmp("0-0:1.0.0", metric->ident) == 0) { // timestamp
                 timestamp = value.substring(0, value.length() - 1); // cut off DST indicator
+                timestampDST = value.charAt(value.length() - 1) == 'S';
 
               } else if (strcmp("0-0:96.1.1", metric->ident) == 0) {  // device serial number
                 // is this useful?
@@ -271,8 +286,11 @@ void parseTelegram(char* telegram)
           }
         }
 
-        if (strlen(metric->description) > 0)
-          Serial.print("  -> " + metric->description + " [" + value + "]");
+        if (strlen(metric->description) > 0) {
+          Serial.print("  -> ");
+          Serial.print(metric->description);
+          Serial.print(" [" + value + "]");
+        }
 
         if (allowPublish && strlen(metric->topic) > 0)
           client.publish(metric->topic, value.c_str(), true);
