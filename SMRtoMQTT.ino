@@ -1,7 +1,6 @@
 #include <ESP8266WiFi.h>
-
-#define MAX_PACKET_SIZE 1280
 #include <PubSubClient.h>
+// to use PubSubClient with influx publishing enabled, the MAX_PACKET_SIZE constant in PubSubClient.h must be set to at least 1024 (to be sure)
 
 #include "Crc16.h"
 Crc16 CRC;
@@ -40,9 +39,9 @@ typedef struct {
 // leaving the third entry (influx_column) empty will disable inclusion in the influx formatted metric, if enabled
 
 metricDef metricDefs[] = {
-  { "1-3:0.2.8",   METRIC_TYPE_META,      "",   "",           "SMR protocol version"  },
-  { "0-0:1.0.0",   METRIC_TYPE_META,      "",   "timestamp",  "telegram timestamp"    },
-  { "0-0:96.1.1",  METRIC_TYPE_META_TEXT, "",   "",           "meter serial number"   },
+  { "1-3:0.2.8",   METRIC_TYPE_META,      "",           "",   "SMR protocol version"  },
+  { "0-0:1.0.0",   METRIC_TYPE_META,      "timestamp",  "",   "telegram timestamp"    },
+  { "0-0:96.1.1",  METRIC_TYPE_META_TEXT, "",           "",   "meter serial number"   },
 
   { "1-0:1.8.1",   METRIC_TYPE_FLOAT, "delivered_low",      "whiskeygrid/energy/mains/reading/delivered/low",     "total delivered energy (low tariff)" },
   { "1-0:1.8.2",   METRIC_TYPE_FLOAT, "delivered_high",     "whiskeygrid/energy/mains/reading/delivered/high",    "total delivered energy (high tariff)" },
@@ -216,11 +215,11 @@ void parseTelegram(char* telegram)
   #ifdef INFLUX
     String influxLine;
     influxLine.reserve(1024);
-    influxLine.concat(influxMeasurement);
-    influxLine.concat(",");
 
     String influxTags;
     influxTags.reserve(384);
+    influxTags.concat(influxMeasurement);
+    influxTags.concat(',');
 
     String influxFields;
     influxFields.reserve(640);
@@ -246,6 +245,7 @@ void parseTelegram(char* telegram)
 
         // post influx string to influxTopic
         influxLine.concat(influxTags + " " + influxFields);
+        Serial.println(influxLine);
         client.publish(influxTopic, influxLine.c_str(), true);
       #endif
 
@@ -296,7 +296,7 @@ void parseTelegram(char* telegram)
                 if (allowPublish && strlen(metric->influx_column) > 0) {
                   influxFields.concat(metric->influx_column);
                   influxFields.concat('=');
-                  influxFields.concat(value);
+                  influxFields.concat(value.substring(0, value.lastIndexOf(' ')));
                   influxFields.concat(',');
                 }
               #endif
@@ -320,9 +320,9 @@ void parseTelegram(char* telegram)
                 #ifdef INFLUX
                   if (strlen(metric->influx_column) > 0) {
                     influxFields.concat(metric->influx_column);
-                    influxFields.concat('="');
+                    influxFields.concat("=\"");
                     influxFields.concat(value);
-                    influxFields.concat('",');
+                    influxFields.concat("\",");
                   }
                 #endif
 
@@ -348,9 +348,9 @@ void parseTelegram(char* telegram)
               #ifdef INFLUX
                 if (strlen(metric->influx_column) > 0) {
                   influxTags.concat(metric->influx_column);
-                  influxTags.concat('="');
+                  influxTags.concat("=\"");
                   influxTags.concat(value);
-                  influxTags.concat('",');
+                  influxTags.concat("\",");
                 }
               #endif
 
@@ -361,14 +361,17 @@ void parseTelegram(char* telegram)
         if (strlen(metric->description) > 0) {
           Serial.print("  -> ");
           Serial.print(metric->description);
-          Serial.print(" [" + value + "]");
+          Serial.println(" [" + value + "]");
         }
 
-        if (allowPublish && strlen(metric->topic) > 0)
+        if (allowPublish && strlen(metric->topic) > 0) {
+          Serial.print(metric->topic);
+          Serial.print(' ');
+          Serial.println(value.c_str());
           client.publish(metric->topic, value.c_str(), true);
       }
     }
-    Serial.print("\n\n");
+    Serial.print('\n');
   }
 
 }
