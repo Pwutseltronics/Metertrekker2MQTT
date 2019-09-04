@@ -1,4 +1,6 @@
 #include <ESP8266WiFi.h>
+
+#define MAX_PACKET_SIZE 1280
 #include <PubSubClient.h>
 
 #include "Crc16.h"
@@ -12,10 +14,16 @@ const int   mqttPort  = 1883;
 const char* clientID  = "EnergyMonitor";
 const char* connTopic = "whiskeygrid/debug/node_connect";
 
+#define INFLUX  // comment to disable influx
+#ifdef INFLUX
+  const char* influxTopic = "whiskeygrid/energy/influx";
+  const char* influxMeasurement = "energy";
+#endif
 
 typedef struct {
   char ident[12];
   int type;
+  char influx_column[24];
   char topic[72];
   char description[48];
 } metricDef;
@@ -29,48 +37,49 @@ typedef struct {
 #define METRIC_TYPE_OTHER    99
 
 // Metric and MQTT topic settings: comment a line to disable processing/publishing of the metric
+// leaving the third entry (influx_column) empty will disable inclusion in the influx formatted metric, if enabled
 
 metricDef metricDefs[] = {
-  { "1-3:0.2.8",   METRIC_TYPE_META,  "",       "SMR protocol version" },
-  { "0-0:1.0.0",   METRIC_TYPE_META,  "",       "telegram timestamp" },
-  { "0-0:96.1.1",  METRIC_TYPE_META_TEXT,  "",  "meter serial number" },
+  { "1-3:0.2.8",   METRIC_TYPE_META,      "",   "",           "SMR protocol version"  },
+  { "0-0:1.0.0",   METRIC_TYPE_META,      "",   "timestamp",  "telegram timestamp"    },
+  { "0-0:96.1.1",  METRIC_TYPE_META_TEXT, "",   "",           "meter serial number"   },
 
-  { "1-0:1.8.1",   METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/reading/delivered/low",     "total delivered energy (low tariff)" },
-  { "1-0:1.8.2",   METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/reading/delivered/high",    "total delivered energy (high tariff)" },
-  { "1-0:2.8.1",   METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/reading/redelivered/low",   "total redelivered (low tariff)" },
-  { "1-0:2.8.2",   METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/reading/redelivered/high",  "total redelivered (high tariff)" },
-  { "0-0:96.14.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/reading/tariff",            "tariff" },
-  { "1-0:1.7.0",   METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/total",               "total power" },
-  { "1-0:2.7.0",   METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/total_redelivery",    "total redelivery power" },
-  { "1-0:21.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L1",                  "L1 power" },
-  { "1-0:22.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L1_redelivery",       "L1 redelivery power" },
-  { "1-0:32.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/voltage/L1",                "L1 voltage" },
-  { "1-0:31.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/current/L1",                "L1 current" },
-  // { "1-0:41.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L2",                  "L2 power" },
-  // { "1-0:42.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L2_redelivery",       "L2 redelivery power" },
-  // { "1-0:52.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/voltage/L2",                "L2 voltage" },
-  // { "1-0:51.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/current/L2",                "L2 current" },
-  // { "1-0:61.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L3",                  "L3 power" },
-  // { "1-0:62.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/power/L3_redelivery",       "L3 redelivery power" },
-  // { "1-0:72.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/voltage/L3",                "L3 voltage" },
-  // { "1-0:71.7.0",  METRIC_TYPE_FLOAT, "whiskeygrid/energy/mains/current/L3",                "L3 current" },
+  { "1-0:1.8.1",   METRIC_TYPE_FLOAT, "delivered_low",      "whiskeygrid/energy/mains/reading/delivered/low",     "total delivered energy (low tariff)" },
+  { "1-0:1.8.2",   METRIC_TYPE_FLOAT, "delivered_high",     "whiskeygrid/energy/mains/reading/delivered/high",    "total delivered energy (high tariff)" },
+  { "1-0:2.8.1",   METRIC_TYPE_FLOAT, "redelivered_low",    "whiskeygrid/energy/mains/reading/redelivered/low",   "total redelivered (low tariff)" },
+  { "1-0:2.8.2",   METRIC_TYPE_FLOAT, "redelivered_high",   "whiskeygrid/energy/mains/reading/redelivered/high",  "total redelivered (high tariff)" },
+  { "0-0:96.14.0", METRIC_TYPE_BARE,  "tariff",             "whiskeygrid/energy/mains/reading/tariff",            "tariff" },
+  { "1-0:1.7.0",   METRIC_TYPE_FLOAT, "P_total",            "whiskeygrid/energy/mains/power/total",               "total power" },
+  { "1-0:2.7.0",   METRIC_TYPE_FLOAT, "P_total_redelivery", "whiskeygrid/energy/mains/power/total_redelivery",    "total redelivery power" },
+  { "1-0:21.7.0",  METRIC_TYPE_FLOAT, "P_L1",               "whiskeygrid/energy/mains/power/L1",                  "L1 power" },
+  { "1-0:22.7.0",  METRIC_TYPE_FLOAT, "P_L1_redelivery",    "whiskeygrid/energy/mains/power/L1_redelivery",       "L1 redelivery power" },
+  { "1-0:32.7.0",  METRIC_TYPE_FLOAT, "V_L1",               "whiskeygrid/energy/mains/voltage/L1",                "L1 voltage" },
+  { "1-0:31.7.0",  METRIC_TYPE_FLOAT, "I_L1",               "whiskeygrid/energy/mains/current/L1",                "L1 current" },
+  // { "1-0:41.7.0",  METRIC_TYPE_FLOAT, "P_L2",               "whiskeygrid/energy/mains/power/L2",                  "L2 power" },
+  // { "1-0:42.7.0",  METRIC_TYPE_FLOAT, "P_L2_redelivery",    "whiskeygrid/energy/mains/power/L2_redelivery",       "L2 redelivery power" },
+  // { "1-0:52.7.0",  METRIC_TYPE_FLOAT, "V_L2",               "whiskeygrid/energy/mains/voltage/L2",                "L2 voltage" },
+  // { "1-0:51.7.0",  METRIC_TYPE_FLOAT, "I_L2",               "whiskeygrid/energy/mains/current/L2",                "L2 current" },
+  // { "1-0:61.7.0",  METRIC_TYPE_FLOAT, "P_L3",               "whiskeygrid/energy/mains/power/L3",                  "L3 power" },
+  // { "1-0:62.7.0",  METRIC_TYPE_FLOAT, "P_L3_redelivery",    "whiskeygrid/energy/mains/power/L3_redelivery",       "L3 redelivery power" },
+  // { "1-0:72.7.0",  METRIC_TYPE_FLOAT, "V_L3",               "whiskeygrid/energy/mains/voltage/L3",                "L3 voltage" },
+  // { "1-0:71.7.0",  METRIC_TYPE_FLOAT, "I_L3",               "whiskeygrid/energy/mains/current/L3",                "L3 current" },
 
-  { "0-1:24.1.0",  METRIC_TYPE_BARE,      "",   "gas meter device type" },
-  { "0-1:96.1.0",  METRIC_TYPE_META_TEXT, "",   "gas meter serial number" },
+  { "0-1:24.1.0",  METRIC_TYPE_BARE,      "",   "",   "gas meter device type" },
+  { "0-1:96.1.0",  METRIC_TYPE_META_TEXT, "",   "",   "gas meter serial number" },
 
-  { "0-1:24.2.1",  METRIC_TYPE_GAS,   "whiskeygrid/energy/gas/reading",   "gas meter last reading" },
+  { "0-1:24.2.1",  METRIC_TYPE_GAS,   "gas_reading",    "whiskeygrid/energy/gas/reading",   "gas meter last reading" },
 
-  { "0-0:96.7.21", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/powerfailures",        "power failures" },
-  { "0-0:96.7.9",  METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/powerfailures_long",   "long power failures" },
-  { "1-0:99.97.0", METRIC_TYPE_OTHER, "whiskeygrid/energy/mains/report/powerfailure_details", "power failure event log" },
-  { "1-0:32.32.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_sags/L1",      "L1 voltage sags" },
-  // { "1-0:52.32.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_sags/L2",      "L2 voltage sags" },
-  // { "1-0:72.32.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_sags/L3",      "L3 voltage sags" },
-  { "1-0:32.36.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_swells/L1",    "L1 voltage swells" },
-  // { "1-0:52.36.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_swells/L2",    "L2 voltage swells" },
-  // { "1-0:72.36.0", METRIC_TYPE_BARE,  "whiskeygrid/energy/mains/report/voltage_swells/L3",    "L3 voltage swells" },
+  { "0-0:96.7.21", METRIC_TYPE_BARE,  "failures",       "whiskeygrid/energy/mains/report/powerfailures",        "power failures" },
+  { "0-0:96.7.9",  METRIC_TYPE_BARE,  "long_failures",  "whiskeygrid/energy/mains/report/powerfailures_long",   "long power failures" },
+  { "1-0:99.97.0", METRIC_TYPE_OTHER, "failure_log",    "whiskeygrid/energy/mains/report/powerfailure_details", "power failure event log" },
+  { "1-0:32.32.0", METRIC_TYPE_BARE,  "L1_sags",        "whiskeygrid/energy/mains/report/voltage_sags/L1",      "L1 voltage sags" },
+  // { "1-0:52.32.0", METRIC_TYPE_BARE,  "L2_sags",        "whiskeygrid/energy/mains/report/voltage_sags/L2",      "L2 voltage sags" },
+  // { "1-0:72.32.0", METRIC_TYPE_BARE,  "L3_sags",        "whiskeygrid/energy/mains/report/voltage_sags/L3",      "L3 voltage sags" },
+  { "1-0:32.36.0", METRIC_TYPE_BARE,  "L1_swells",      "whiskeygrid/energy/mains/report/voltage_swells/L1",    "L1 voltage swells" },
+  // { "1-0:52.36.0", METRIC_TYPE_BARE,  "L2_swells",      "whiskeygrid/energy/mains/report/voltage_swells/L2",    "L2 voltage swells" },
+  // { "1-0:72.36.0", METRIC_TYPE_BARE,  "L3_swells",      "whiskeygrid/energy/mains/report/voltage_swells/L3",    "L3 voltage swells" },
 
-  { "0-0:96.13.0", METRIC_TYPE_TEXT,  "whiskeygrid/energy/mains/message",   "text message" }  // text message
+  { "0-0:96.13.0", METRIC_TYPE_TEXT,  "message",   "whiskeygrid/energy/mains/message",   "text message" }  // text message
 };
 
 const int interval = 15000;
@@ -92,12 +101,20 @@ PubSubClient client(espClient);
 char msg[50];
 
 
+#ifdef RTS_INVERT_LOGIC
+  #define RTS_HIGH LOW
+  #define RTS_LOW HIGH
+#else
+  #define RTS_HIGH HIGH
+  #define RTS_LOW LOW
+#endif
+
 void setup()
 {
   Serial.begin(115200);
   Serial.setTimeout(100);
   pinMode(RTSpin, OUTPUT);
-  digitalWrite(RTSpin, LOW);
+  digitalWrite(RTSpin, RTS_LOW);
 
   setupWifi();
   client.setServer(mqttServ, mqttPort);
@@ -162,14 +179,6 @@ void loop()
 }
 
 
-#ifdef RTS_INVERT_LOGIC
-  #define RTS_HIGH LOW
-  #define RTS_LOW HIGH
-#else
-  #define RTS_HIGH HIGH
-  #define RTS_LOW LOW
-#endif
-
 void requestTelegram()
 {
   Serial.println("Requesting telegram...");
@@ -204,6 +213,19 @@ void parseTelegram(char* telegram)
   metricDef* metric;
   bool allowPublish;
 
+  #ifdef INFLUX
+    String influxLine;
+    influxLine.reserve(1024);
+    influxLine.concat(influxMeasurement);
+    influxLine.concat(",");
+
+    String influxTags;
+    influxTags.reserve(384);
+
+    String influxFields;
+    influxFields.reserve(640);
+  #endif
+
   Serial.print("==== START OF TELEGRAM ====\n\n");
 
   lineptr = strtok(telegram, "\r\n");
@@ -216,6 +238,17 @@ void parseTelegram(char* telegram)
 
     if (line.charAt(0) == '!') {
       Serial.println("==== END OF TELEGRAM ====");
+
+      #ifdef INFLUX
+        // remove commas from ends of tags and fields strings
+        influxTags.remove(influxTags.length() - 1);
+        influxFields.remove(influxFields.length() - 1);
+
+        // post influx string to influxTopic
+        influxLine.concat(influxTags + " " + influxFields);
+        client.publish(influxTopic, influxLine.c_str(), true);
+      #endif
+
       break;
     }
 
@@ -235,9 +268,17 @@ void parseTelegram(char* telegram)
 
         if (metric != NULL) {
           switch (metric->type) {
-            // case METRIC_TYPE_BARE:
-            //   // don't do anything
-            //   break;
+            case METRIC_TYPE_BARE:
+              #ifdef INFLUX
+                if (strlen(metric->influx_column) > 0) {
+                  influxFields.concat(metric->influx_column);
+                  influxFields.concat('=');
+                  influxFields.concat(value);
+                  influxFields.concat(',');
+                }
+              #endif
+
+              break;
 
             case METRIC_TYPE_GAS:
               gasTimestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')') - 1);
@@ -250,6 +291,16 @@ void parseTelegram(char* telegram)
 
             case METRIC_TYPE_FLOAT:
               value.replace("*", " ");
+
+              #ifdef INFLUX
+                if (allowPublish && strlen(metric->influx_column) > 0) {
+                  influxFields.concat(metric->influx_column);
+                  influxFields.concat('=');
+                  influxFields.concat(value);
+                  influxFields.concat(',');
+                }
+              #endif
+
               break;
 
             case METRIC_TYPE_TEXT:
@@ -265,7 +316,18 @@ void parseTelegram(char* telegram)
               }
               value = tmpValue;
 
-              if (metric->type == METRIC_TYPE_TEXT) break;
+              if (metric->type == METRIC_TYPE_TEXT) {
+                #ifdef INFLUX
+                  if (strlen(metric->influx_column) > 0) {
+                    influxFields.concat(metric->influx_column);
+                    influxFields.concat('="');
+                    influxFields.concat(value);
+                    influxFields.concat('",');
+                  }
+                #endif
+
+                break;
+              }
 
             case METRIC_TYPE_META:
 
@@ -282,6 +344,16 @@ void parseTelegram(char* telegram)
               } else if (strcmp("0-1:96.1.0", metric->ident) == 0) {  // gas meter serial number
                 // is this useful?
               }
+
+              #ifdef INFLUX
+                if (strlen(metric->influx_column) > 0) {
+                  influxTags.concat(metric->influx_column);
+                  influxTags.concat('="');
+                  influxTags.concat(value);
+                  influxTags.concat('",');
+                }
+              #endif
+
               break;
           }
         }
