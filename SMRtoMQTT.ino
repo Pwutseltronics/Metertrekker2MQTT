@@ -10,6 +10,7 @@ const char* password  = "WIFI_PASSWORD";
 const char* mqttServ  = "MQTT_SERV_IP";
 const int   mqttPort  = 1883;
 const char* clientID  = "EnergyMonitor";
+const char* connTopic = "whiskeygrid/debug/node_connect";
 
 
 typedef struct {
@@ -234,10 +235,6 @@ void parseTelegram(char* telegram)
 
         if (metric != NULL) {
           switch (metric->type) {
-            case METRIC_TYPE_FLOAT:
-              value.replace("*", " ");
-              break;
-
             // case METRIC_TYPE_BARE:
             //   // don't do anything
             //   break;
@@ -250,6 +247,9 @@ void parseTelegram(char* telegram)
               allowPublish = gasTimestamp > lastGasTimestamp;
 
               lastGasTimestamp = gasTimestamp;
+
+            case METRIC_TYPE_FLOAT:
+              value.replace("*", " ");
               break;
 
             case METRIC_TYPE_TEXT:
@@ -354,7 +354,7 @@ void reconnect()
       char lostSecStr[6];
       dtostrf(lostSeconds, 1, 1, lostSecStr);
       sprintf(msg, "%s (re)connected after %ss", clientID, lostSecStr);
-      // client.publish(connTopic, msg);
+      client.publish(connTopic, msg);
       Serial.println(msg);
 
       // client.subscribe(callTopic);  // ... and resubscribe
