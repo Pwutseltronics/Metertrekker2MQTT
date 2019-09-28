@@ -41,8 +41,8 @@ typedef struct {
 metricDef metricDefs[] = {
 //{ "OBIS ref.",    METRIC_TYPE_CONSTANT,   "influx col.",    "MQTT topic", "description (only for serial debug output)" },
   { "1-3:0.2.8",    METRIC_TYPE_META,       "",               "",           "SMR protocol version"  },
-  { "0-0:1.0.0",    METRIC_TYPE_META,       "timestamp",      "",           "telegram timestamp"    },
-  { "0-0:96.1.1",   METRIC_TYPE_META_TEXT,  "",               "",           "meter serial number"   },
+  { "0-0:1.0.0",    METRIC_TYPE_BARE,       "timestamp",      "",           "telegram timestamp"    },
+  { "0-0:96.1.1",   METRIC_TYPE_META_TEXT,  "meter_sn",       "",           "meter serial number"   },
 
   { "1-0:1.8.1",    METRIC_TYPE_FLOAT,  "delivered_low",      "whiskeygrid/energy/mains/reading/delivered/low",     "total delivered energy (low tariff)" },
   { "1-0:1.8.2",    METRIC_TYPE_FLOAT,  "delivered_high",     "whiskeygrid/energy/mains/reading/delivered/high",    "total delivered energy (high tariff)" },
@@ -64,8 +64,8 @@ metricDef metricDefs[] = {
   // { "1-0:72.7.0",   METRIC_TYPE_FLOAT,  "V_L3",               "whiskeygrid/energy/mains/voltage/L3",                "L3 voltage" },
   // { "1-0:71.7.0",   METRIC_TYPE_FLOAT,  "I_L3",               "whiskeygrid/energy/mains/current/L3",                "L3 current" },
 
-  { "0-1:24.1.0",   METRIC_TYPE_BARE,       "",   "",   "gas meter device type" },
-  { "0-1:96.1.0",   METRIC_TYPE_META_TEXT,  "",   "",   "gas meter serial number" },
+  { "0-1:24.1.0",   METRIC_TYPE_BARE,       "",               "",   "gas meter device type" },
+  { "0-1:96.1.0",   METRIC_TYPE_META_TEXT,  "gas_meter_sn",   "",   "gas meter serial number" },
 
   { "0-1:24.2.1",   METRIC_TYPE_GAS,    "gas_reading",    "whiskeygrid/energy/gas/reading",   "gas meter last reading" },
 
@@ -279,6 +279,11 @@ void parseTelegram(char* telegram)
                 }
               #endif
 
+              // if (strcmp("0-0:1.0.0", metric->ident) == 0) { // timestamp
+              //   timestamp = value.substring(0, value.length() - 1); // cut off DST indicator
+              //   timestampDST = value.charAt(value.length() - 1) == 'S';
+              // }
+
               break;
 
             case METRIC_TYPE_GAS:
@@ -335,10 +340,6 @@ void parseTelegram(char* telegram)
               if (strcmp("1-3:0.2.8", metric->ident) == 0) { // SMR protocol version
                 //TODO: use this value to adjust protocol handling
 
-              } else if (strcmp("0-0:1.0.0", metric->ident) == 0) { // timestamp
-                timestamp = value.substring(0, value.length() - 1); // cut off DST indicator
-                timestampDST = value.charAt(value.length() - 1) == 'S';
-
               } else if (strcmp("0-0:96.1.1", metric->ident) == 0) {  // device serial number
                 // is this useful?
 
@@ -370,6 +371,7 @@ void parseTelegram(char* telegram)
           Serial.print(' ');
           Serial.println(value.c_str());
           client.publish(metric->topic, value.c_str(), true);
+        }
       }
     }
     Serial.print('\n');
