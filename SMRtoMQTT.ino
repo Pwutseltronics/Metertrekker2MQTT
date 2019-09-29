@@ -16,7 +16,8 @@ const char* connTopic = "whiskeygrid/debug/node_connect";
 #define INFLUX  // comment to disable influx
 #ifdef INFLUX
   const char* influxTopic = "whiskeygrid/energy/influx";
-  const char* influxMeasurement = "energy";
+  const char* influxElectricityMeasurement = "electricity";
+  const char* influxGasMeasurement = "gas";
 #endif
 
 typedef struct {
@@ -211,7 +212,7 @@ void parseTelegram(char* telegram)
   bool timestampDST, gasTimestampDST;
   byte hexbuf[3];
   metricDef* metric;
-  bool allowPublish;
+  bool allowPublish, publishGas = 0;
 
   #ifdef INFLUX
     String influxLine;
@@ -219,11 +220,19 @@ void parseTelegram(char* telegram)
 
     String influxTags;
     influxTags.reserve(384);
-    influxTags.concat(influxMeasurement);
+    influxTags.concat(influxElectricityMeasurement);
     influxTags.concat(',');
 
     String influxFields;
     influxFields.reserve(640);
+
+    // separate variables for handling gas measurement
+    String influxGasLine, influxGasTags, influxGasFields;
+    influxGasLine.reserve(128);
+    influxGasTags.reserve(64);
+    influxGasFields.reserve(64);
+    influxGasTags.concat(influxGasMeasurement);
+    influxGasTags.concat(',');
   #endif
 
   Serial.print("==== START OF TELEGRAM ====\n\n");
@@ -244,10 +253,20 @@ void parseTelegram(char* telegram)
         influxTags.remove(influxTags.length() - 1);
         influxFields.remove(influxFields.length() - 1);
 
-        // post influx string to influxTopic
+        influxGasTags.remove(influxTags.length() - 1);
+        influxGasFields.remove(influxFields.length() - 1);
+
+        // post influx electricity measurement to influxTopic
         influxLine.concat(influxTags + " " + influxFields);
         Serial.println(influxLine);
         client.publish(influxTopic, influxLine.c_str(), true);
+
+        if (publishGas) {
+          // post influx gas measurement to influxTopic
+          influxGasLine.concat(influxGasTags + " " + influxGasFields);
+          Serial.println(influxGasLine);
+          client.publish(influxTopic, influxGasLine.c_str(), true);
+        }
       #endif
 
       break;
@@ -287,19 +306,40 @@ void parseTelegram(char* telegram)
               break;
 
             case METRIC_TYPE_GAS:
-              gasTimestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')') - 1);
-              gasTimestampDST = line.charAt(line.indexOf(')') - 1) == 'S';
+              // gasTimestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')') - 1);
+              // gasTimestampDST = line.charAt(line.indexOf(')') - 1) == 'S';
+              gasTimestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')'));
               Serial.print("\t@{" + gasTimestamp + "}");
 
-              allowPublish = gasTimestamp > lastGasTimestamp;
+              publishGas = allowPublish = (gasTimestamp > lastGasTimestamp);
 
               lastGasTimestamp = gasTimestamp;
+
+              value.replace("*", " ");
+
+              #ifdef INFLUX
+                if (publishGas && strlen(metric->influx_column) > 0) {
+                  // add gas measurement timestamp to gas measurement line
+                  influxGasFields.concat("timestamp");
+                  influxGasFields.concat("=\"");
+                  influxGasFields.concat(gasTimestamp);
+                  influxGasFields.concat("\",");
+
+                  // add gas reading to gas measurement line
+                  influxGasFields.concat(metric->influx_column);
+                  influxGasFields.concat('=');
+                  influxGasFields.concat(value.substring(0, value.lastIndexOf(' ')));
+                  influxGasFields.concat(',');
+                }
+              #endif
+
+              break;
 
             case METRIC_TYPE_FLOAT:
               value.replace("*", " ");
 
               #ifdef INFLUX
-                if (allowPublish && strlen(metric->influx_column) > 0) {
+                if (strlen(metric->influx_column) > 0) {
                   influxFields.concat(metric->influx_column);
                   influxFields.concat('=');
                   influxFields.concat(value.substring(0, value.lastIndexOf(' ')));
@@ -344,7 +384,16 @@ void parseTelegram(char* telegram)
                 // is this useful?
 
               } else if (strcmp("0-1:96.1.0", metric->ident) == 0) {  // gas meter serial number
-                // is this useful?
+                #ifdef INFLUX
+                  if (strlen(metric->influx_column) > 0) {
+                    influxGasTags.concat(metric->influx_column);
+                    influxGasTags.concat('=');
+                    influxGasTags.concat(value.substring(0, value.lastIndexOf(' ')));
+                    influxGasTags.concat(',');
+                  }
+                #endif
+
+                break;
               }
 
               #ifdef INFLUX
