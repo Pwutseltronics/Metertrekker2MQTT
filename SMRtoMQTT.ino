@@ -42,7 +42,7 @@ typedef struct {
 metricDef metricDefs[] = {
 //{ "OBIS ref.",    METRIC_TYPE_CONSTANT,   "influx col.",    "MQTT topic", "description (only for serial debug output)" },
   { "1-3:0.2.8",    METRIC_TYPE_META,       "",               "",           "SMR protocol version"  },
-  { "0-0:1.0.0",    METRIC_TYPE_BARE,       "timestamp",      "",           "telegram timestamp"    },
+  { "0-0:1.0.0",    METRIC_TYPE_META,       "timestamp",      "",           "telegram timestamp"    },
   { "0-0:96.1.1",   METRIC_TYPE_META_TEXT,  "meter_sn",       "",           "meter serial number"   },
 
   { "1-0:1.8.1",    METRIC_TYPE_FLOAT,  "delivered_low",      "whiskeygrid/energy/mains/reading/delivered/low",     "total delivered energy (low tariff)" },
@@ -291,17 +291,9 @@ void parseTelegram(char* telegram)
             case METRIC_TYPE_BARE:
               #ifdef INFLUX
                 if (strlen(metric->influx_column) > 0) {
-                  influxFields.concat(metric->influx_column);
-                  influxFields.concat('=');
-                  influxFields.concat(value);
-                  influxFields.concat(',');
+                  appendInfluxValue(influxFields, metric->influx_column, value, false);
                 }
               #endif
-
-              // if (strcmp("0-0:1.0.0", metric->ident) == 0) { // timestamp
-              //   timestamp = value.substring(0, value.length() - 1); // cut off DST indicator
-              //   timestampDST = value.charAt(value.length() - 1) == 'S';
-              // }
 
               break;
 
@@ -320,16 +312,10 @@ void parseTelegram(char* telegram)
               #ifdef INFLUX
                 if (publishGas && strlen(metric->influx_column) > 0) {
                   // add gas measurement timestamp to gas measurement line
-                  influxGasFields.concat("timestamp");
-                  influxGasFields.concat("=\"");
-                  influxGasFields.concat(gasTimestamp);
-                  influxGasFields.concat("\",");
+                  appendInfluxValue(influxGasFields, "timestamp", gasTimestamp, true);
 
                   // add gas reading to gas measurement line
-                  influxGasFields.concat(metric->influx_column);
-                  influxGasFields.concat('=');
-                  influxGasFields.concat(value.substring(0, value.lastIndexOf(' ')));
-                  influxGasFields.concat(',');
+                  appendInfluxValue(influxGasFields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
                 }
               #endif
 
@@ -340,10 +326,7 @@ void parseTelegram(char* telegram)
 
               #ifdef INFLUX
                 if (strlen(metric->influx_column) > 0) {
-                  influxFields.concat(metric->influx_column);
-                  influxFields.concat('=');
-                  influxFields.concat(value.substring(0, value.lastIndexOf(' ')));
-                  influxFields.concat(',');
+                  appendInfluxValue(influxFields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
                 }
               #endif
 
@@ -365,10 +348,7 @@ void parseTelegram(char* telegram)
               if (metric->type == METRIC_TYPE_TEXT) {
                 #ifdef INFLUX
                   if (strlen(metric->influx_column) > 0) {
-                    influxFields.concat(metric->influx_column);
-                    influxFields.concat("=\"");
-                    influxFields.concat(value);
-                    influxFields.concat("\",");
+                    appendInfluxValue(influxFields, metric->influx_column, value, true);
                   }
                 #endif
 
@@ -377,33 +357,34 @@ void parseTelegram(char* telegram)
 
             case METRIC_TYPE_META:
 
-              if (strcmp("1-3:0.2.8", metric->ident) == 0) { // SMR protocol version
-                //TODO: use this value to adjust protocol handling
+              if (strcmp("0-0:1.0.0", metric->ident) == 0) { // timestamp
+                // timestamp = value.substring(0, value.length() - 1); // cut off DST indicator
+                // timestampDST = value.charAt(value.length() - 1) == 'S';
 
-              } else if (strcmp("0-0:96.1.1", metric->ident) == 0) {  // device serial number
-                // is this useful?
+                #ifdef INFLUX
+                  if (strlen(metric->influx_column) > 0)
+                    appendInfluxValue(influxFields, metric->influx_column, value, true);
+                #endif
 
               } else if (strcmp("0-1:96.1.0", metric->ident) == 0) {  // gas meter serial number
                 #ifdef INFLUX
-                  if (strlen(metric->influx_column) > 0) {
-                    influxGasTags.concat(metric->influx_column);
-                    influxGasTags.concat('=');
-                    influxGasTags.concat(value.substring(0, value.lastIndexOf(' ')));
-                    influxGasTags.concat(',');
-                  }
+                  if (strlen(metric->influx_column) > 0)
+                    appendInfluxValue(influxGasTags, metric->influx_column, value, true);
                 #endif
 
-                break;
-              }
+              // } else if (strcmp("1-3:0.2.8", metric->ident) == 0) { // SMR protocol version
+              //   //TODO: use this value to adjust protocol handling
 
-              #ifdef INFLUX
-                if (strlen(metric->influx_column) > 0) {
-                  influxTags.concat(metric->influx_column);
-                  influxTags.concat("=\"");
-                  influxTags.concat(value);
-                  influxTags.concat("\",");
-                }
-              #endif
+              // } else if (strcmp("0-0:96.1.1", metric->ident) == 0) {  // device serial number
+              //   // is this useful?
+
+              } else {
+                #ifdef INFLUX
+                  if (strlen(metric->influx_column) > 0) {
+                    appendInfluxValue(influxTags, metric->influx_column, value, true);
+                  }
+                #endif
+              }
 
               break;
           }
@@ -438,6 +419,15 @@ metricDef* getMetricDef(const char* ident)
     }
   }
   return NULL;
+}
+
+
+void appendInfluxValue(String influxString, char* column_name, String value, bool valueIsString)
+{
+  influxString.concat(column_name);
+  influxString.concat(valueIsString ? "=\"" : '=');
+  influxString.concat(value);
+  influxString.concat(valueIsString ? "\"," : ',');
 }
 
 
