@@ -253,8 +253,8 @@ void parseTelegram(char* telegram)
         influxTags.remove(influxTags.length() - 1);
         influxFields.remove(influxFields.length() - 1);
 
-        influxGasTags.remove(influxTags.length() - 1);
-        influxGasFields.remove(influxFields.length() - 1);
+        influxGasTags.remove(influxGasTags.length() - 1);
+        influxGasFields.remove(influxGasFields.length() - 1);
 
         // post influx electricity measurement to influxTopic
         influxLine.concat(influxTags + " " + influxFields);
@@ -291,7 +291,7 @@ void parseTelegram(char* telegram)
             case METRIC_TYPE_BARE:
               #ifdef INFLUX
                 if (strlen(metric->influx_column) > 0) {
-                  appendInfluxValue(influxFields, metric->influx_column, value, false);
+                  appendInfluxValue(&influxFields, metric->influx_column, value, false);
                 }
               #endif
 
@@ -312,10 +312,10 @@ void parseTelegram(char* telegram)
               #ifdef INFLUX
                 if (publishGas && strlen(metric->influx_column) > 0) {
                   // add gas measurement timestamp to gas measurement line
-                  appendInfluxValue(influxGasFields, "timestamp", gasTimestamp, true);
+                  appendInfluxValue(&influxGasFields, "timestamp", gasTimestamp, true);
 
                   // add gas reading to gas measurement line
-                  appendInfluxValue(influxGasFields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
+                  appendInfluxValue(&influxGasFields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
                 }
               #endif
 
@@ -326,7 +326,7 @@ void parseTelegram(char* telegram)
 
               #ifdef INFLUX
                 if (strlen(metric->influx_column) > 0) {
-                  appendInfluxValue(influxFields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
+                  appendInfluxValue(&influxFields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
                 }
               #endif
 
@@ -348,7 +348,7 @@ void parseTelegram(char* telegram)
               if (metric->type == METRIC_TYPE_TEXT) {
                 #ifdef INFLUX
                   if (strlen(metric->influx_column) > 0) {
-                    appendInfluxValue(influxFields, metric->influx_column, value, true);
+                    appendInfluxValue(&influxFields, metric->influx_column, value, true);
                   }
                 #endif
 
@@ -363,13 +363,13 @@ void parseTelegram(char* telegram)
 
                 #ifdef INFLUX
                   if (strlen(metric->influx_column) > 0)
-                    appendInfluxValue(influxFields, metric->influx_column, value, true);
+                    appendInfluxValue(&influxFields, metric->influx_column, value, true);
                 #endif
 
               } else if (strcmp("0-1:96.1.0", metric->ident) == 0) {  // gas meter serial number
                 #ifdef INFLUX
                   if (strlen(metric->influx_column) > 0)
-                    appendInfluxValue(influxGasTags, metric->influx_column, value, true);
+                    appendInfluxValue(&influxGasTags, metric->influx_column, value, true);
                 #endif
 
               // } else if (strcmp("1-3:0.2.8", metric->ident) == 0) { // SMR protocol version
@@ -381,7 +381,7 @@ void parseTelegram(char* telegram)
               } else {
                 #ifdef INFLUX
                   if (strlen(metric->influx_column) > 0) {
-                    appendInfluxValue(influxTags, metric->influx_column, value, true);
+                    appendInfluxValue(&influxTags, metric->influx_column, value, true);
                   }
                 #endif
               }
@@ -422,13 +422,13 @@ metricDef* getMetricDef(const char* ident)
 }
 
 
-void appendInfluxValue(String influxString, char* column_name, String value, bool valueIsString)
+void appendInfluxValue(String* influxString, char* column_name, String value, bool valueIsString)
 {
-  influxString.concat(column_name);
+  influxString->concat(column_name);
   if (valueIsString)
-    influxString.concat("=\"" + value + "\",");
+    influxString->concat("=\"" + value + "\",");
   else
-    influxString.concat('=' + value + ',');
+    influxString->concat('=' + value + ',');
 }
 
 
