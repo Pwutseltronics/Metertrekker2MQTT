@@ -425,9 +425,10 @@ metricDef* getMetricDef(const char* ident)
 void appendInfluxValue(String influxString, char* column_name, String value, bool valueIsString)
 {
   influxString.concat(column_name);
-  influxString.concat(valueIsString ? "=\"" : '=');
-  influxString.concat(value);
-  influxString.concat(valueIsString ? "\"," : ',');
+  if (valueIsString)
+    influxString.concat("=\"" + value + "\",");
+  else
+    influxString.concat('=' + value + ',');
 }
 
 
