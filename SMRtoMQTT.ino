@@ -3,6 +3,8 @@
 #include <PubSubClient.h>
 // To use PubSubClient with influx publishing enabled, the MAX_PACKET_SIZE constant in PubSubClient.h must be set to at least 1024 (to be sure)
 
+#include <SoftwareSerial.h>
+
 #include "Crc16.h"
 Crc16 CRC;
 
@@ -21,6 +23,7 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 char msg[50];
 
+SoftwareSerial P1(SoftRx, SoftRx, true);  // Tx pin must be specified but is overwritten if Rx pin is the same, thus disabling Tx
 
 #ifdef RTS_INVERT_LOGIC
   #define RTS_HIGH LOW
@@ -36,6 +39,9 @@ void setup()
 {
   Serial.begin(115200);
   Serial.setTimeout(100);
+
+  pinMode(SoftRx, INPUT);
+  P1.begin(115200);
 
   pinMode(RTSpin, OUTPUT);
   digitalWrite(RTSpin, RTS_LOW);
@@ -54,9 +60,9 @@ void loop()
   client.loop();
 
   if (millis() - lastTelegram > interval) {
-    if (Serial.available() > 0) {     // check for incoming serial data
-      if (Serial.peek() == '/') {     // check for telegram header
-        readLength = Serial.readBytesUntil('!', bufferIn, 766);
+    if (P1.available() > 0) {     // check for incoming serial data
+      if (P1.peek() == '/') {     // check for telegram header
+        readLength = P1.readBytesUntil('!', bufferIn, 766);
         bufferIn[readLength++] = '!';
         bufferIn[readLength] = 0;
 
@@ -65,7 +71,7 @@ void loop()
         Serial.print("telegram length: ");
         Serial.println(readLength);
 
-        Serial.readBytes(receivedCRC, 4);
+        P1.readBytes(receivedCRC, 4);
         receivedCRC[4] = 0;
         Serial.print("read CRC: ");
         Serial.println(receivedCRC);
@@ -83,21 +89,21 @@ void loop()
 
         Serial.println();
 
-      } else Serial.read();
+      } else P1.read();
 
     } else {
       requestTelegram();
 
       Serial.print("Waiting for telegram");
       for (int i = 0; i < 20; i++) {
-        if (Serial.available() > 0)  break;
+        if (P1.available() > 0)  break;
 
         Serial.print('.');
         delay(15);
       }
       Serial.print("\n\n");
     }
-  } else if (Serial.available() > 0)  Serial.read(); // discard serial input
+  } else if (P1.available() > 0)  P1.read(); // discard serial input
 }
 
 

@@ -23,6 +23,9 @@ const int interval = 15000;
 #define RTS_INVERT_LOGIC
 const int RTSpin = D1;
 
+/* Rx pin for SoftwareSerial */
+const int SoftRx = RX;
+
 /* MQTT topic & InfluxDB column configuration */
 
 typedef struct {
