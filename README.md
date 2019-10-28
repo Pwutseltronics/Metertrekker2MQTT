@@ -1,6 +1,6 @@
 DSMR/ESMR 5.0 telegram to MQTT pusher
 =================================
-Sketch to read data from the P1 port of DSMR compliant energy meters (used in the Netherlands).
+Sketch to read data from the [P1 port](https://www.netbeheernederland.nl/_upload/Files/Slimme_meter_15_a727fce1f1.pdf) of DSMR compliant energy meters (used in the Netherlands).
 It verifies the CRC16 of the telegram, greatly reducing the chance for errors.
 
 The Rx is an open collector output, which means that the current must be supplied by the receiving device and that the resulting output signal is inverted.
