@@ -262,7 +262,7 @@ void parseTelegram(char* telegram)
               tmpValue = "";
               tmpValue.reserve(value.length()/2);
 
-              for (int i = 0; i < value.length()/2; i++) {
+              for (size_t i = 0; i < value.length()/2; i++) {
                 value.substring(i*2).getBytes(hexbuf, 3);
                 hexbuf[2] = 0;
 
@@ -331,7 +331,7 @@ void parseTelegram(char* telegram)
 
 metricDef* getMetricDef(const char* ident)
 {
-  for (int i = 0; i < sizeof(metricDefs)/sizeof(metricDefs[0]); i++)
+  for (size_t i = 0; i < sizeof(metricDefs)/sizeof(metricDefs[0]); i++)
   {
     if (strcmp(ident, metricDefs[i].ident) == 0) {
       return &metricDefs[i];
