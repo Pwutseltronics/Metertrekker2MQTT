@@ -10,13 +10,8 @@ Crc16 CRC;
 
 #include "settings.h"
 
-byte bufferIn[768];
-int readLength;
-char receivedCRC[5];
-
 WiFiClient espClient;
 PubSubClient client(espClient);
-char msg[50];
 
 String mqtt_host;
 int mqtt_port;
@@ -37,13 +32,13 @@ SoftwareSerial P1(RX_PIN, RX_PIN, true);
     #define RTS_LOW LOW
 #endif
 
-long lastTelegram;
-unsigned int interval;
-unsigned int timeout;
-
 // Declare slurp() and spurt(); definition in WiFiSettings.cpp
 String slurp(const String& fn);                         // Read file and return content
 void spurt(const String& fn, const String& content);    // Write content to file
+
+long lastTelegram;
+unsigned int interval;
+unsigned int timeout;
 
 void setup()
 {
@@ -65,6 +60,11 @@ void setup()
     client.setServer(mqtt_host.c_str(), mqtt_port);
     // client.setCallback(callback);
 }
+
+
+byte bufferIn[768];
+int readLength;
+char receivedCRC[5];
 
 void loop()
 {
@@ -405,9 +405,10 @@ void setup_ota()
 
 void connect_mqtt()
 {
+    char msg[50];
     int connLoseMillis = millis();
-    // Loop until connected
-    while (!client.connected()) {
+
+    while (!client.connected()) {   // Loop until connected
         Serial.print("Attempting MQTT connection...");
 
         if (client.connect(WiFiSettings.hostname.c_str())) { // Attempt to connect
