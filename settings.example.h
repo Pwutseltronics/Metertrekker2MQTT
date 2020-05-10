@@ -1,30 +1,38 @@
-/* WiFi and MQTT stuff */
-const char* ssid      = "WIFI_NETWORK";
-const char* password  = "WIFI_PASSWORD";
+/* *** Default settings, adjustable in portal *** */
 
-const char* mqttServ  = "MQTT_SERV_IP";
-const int   mqttPort  = 1883;
-const char* clientID  = "Metertrekker";
-const char* connTopic = "my_mqtt_root/debug/node_connect";
+/* MQTT stuff */
+const char* d_mqtt_host  = "MQTT_SERV_IP";
+const int   d_mqtt_port  = 1883;
+const char* d_client_id  = "Metertrekker";
+const char* d_notify_topic = "my_mqtt_root/debug/node_connect";
 
 /* Comment next line to disable influx: */
 #define INFLUX
 
 #ifdef INFLUX
-  const char* influxTopic = "my_mqtt_root/energy/influx";
-  const char* influxElectricityMeasurement = "electricity";
-  const char* influxGasMeasurement = "gas";
+  const char* d_influx_topic = "my_mqtt_root/energy/influx";
+  const char* d_influx_electricity_measurement = "electricity";
+  const char* d_influx_gas_measurement = "gas";
 #endif
 
-/* Telegram request interval */
-const int interval = 15000;
+/* Default telegram request interval and timeout
+ *
+ * d_interval: default telegram request interval in seconds
+ * d_timeout:  after d_timeout seconds of retrying to get a telegram,
+ *             the portal will be started */
+const unsigned int d_interval = 15;
+const unsigned int d_timeout = d_interval;
 
-/* To invert the RTS output logic, e.g. to use with an output inverter when the GPIO output is too low, uncomment this line: */
+
+/* *** Firmware configuration *** */
+
+/* To invert the RTS output logic, e.g. to use with an output inverter
+ * when the GPIO output is too low, uncomment this line: */
 #define RTS_INVERT_LOGIC
-const int RTSpin = D1;
+#define RTS_PIN D3
 
 /* Rx pin for SoftwareSerial */
-const int SoftRx = RX;
+#define RX_PIN RX
 
 /* MQTT topic & InfluxDB column configuration */
 

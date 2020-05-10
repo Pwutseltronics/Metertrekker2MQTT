@@ -1,4 +1,7 @@
-#include <ESP8266WiFi.h>
+#include <WiFiSettings.h>
+#include <LittleFS.h>
+#include <ArduinoOTA.h>
+#include <WiFiClient.h>
 #include <PubSubClient.h>
 #include <SoftwareSerial.h>
 
@@ -15,8 +18,16 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 char msg[50];
 
+String mqtt_host;
+int mqtt_port;
+String mqtt_notify_topic;
+
+#ifdef INFLUX
+    String influx_topic, influx_electricity_measurement, influx_gas_measurement;
+#endif
+
 // Tx pin must be specified but is overwritten if Rx pin is the same, thus disabling Tx
-SoftwareSerial P1(SoftRx, SoftRx, true);
+SoftwareSerial P1(RX_PIN, RX_PIN, true);
 
 #ifdef RTS_INVERT_LOGIC
     #define RTS_HIGH LOW
@@ -26,21 +37,28 @@ SoftwareSerial P1(SoftRx, SoftRx, true);
     #define RTS_LOW LOW
 #endif
 
-int lastTelegram = -15000;  // time of last telegram reception
+long lastTelegram;
+unsigned int interval;
+unsigned int timeout;
 
 void setup()
 {
     Serial.begin(115200);
     Serial.setTimeout(100);
 
-    pinMode(SoftRx, INPUT);
+    LittleFS.begin();  // Will format on the first run after failing to mount
+    setup_wifi();
+    setup_ota();
+
+    lastTelegram = -interval;
+
+    pinMode(RX_PIN, INPUT);
     P1.begin(115200);
 
-    pinMode(RTSpin, OUTPUT);
-    digitalWrite(RTSpin, RTS_LOW);
+    pinMode(RTS_PIN, OUTPUT);
+    digitalWrite(RTS_PIN, RTS_LOW);
 
-    setupWifi();
-    client.setServer(mqttServ, mqttPort);
+    client.setServer(mqtt_host.c_str(), mqtt_port);
     // client.setCallback(callback);
 }
 
@@ -48,7 +66,7 @@ void loop()
 {
     // WiFi and MQTT stuff
     if (!client.connected()) {
-        reconnect();
+        connect_mqtt();
     }
     client.loop();
 
@@ -82,6 +100,10 @@ void loop()
             } else P1.read();
 
         } else {
+            if (millis() - lastTelegram - interval > timeout) {
+                WiFiSettings.portal();
+            }
+
             requestTelegram();
 
             Serial.print("Waiting for telegram");
@@ -100,9 +122,9 @@ void loop()
 void requestTelegram()
 {
     Serial.println("Requesting telegram...");
-    digitalWrite(RTSpin, RTS_HIGH);
+    digitalWrite(RTS_PIN, RTS_HIGH);
     delay(100);
-    digitalWrite(RTSpin, RTS_LOW);
+    digitalWrite(RTS_PIN, RTS_LOW);
 }
 
 
@@ -136,7 +158,7 @@ void parseTelegram(char* telegram)
 
         String influxTags;
         influxTags.reserve(384);
-        influxTags.concat(influxElectricityMeasurement);
+        influxTags.concat(influx_electricity_measurement);
         influxTags.concat(',');
 
         String influxFields;
@@ -147,7 +169,7 @@ void parseTelegram(char* telegram)
         influxGasLine.reserve(128);
         influxGasTags.reserve(64);
         influxGasFields.reserve(64);
-        influxGasTags.concat(influxGasMeasurement);
+        influxGasTags.concat(influx_gas_measurement);
         influxGasTags.concat(',');
     #endif
 
@@ -175,13 +197,13 @@ void parseTelegram(char* telegram)
                 // post influx electricity measurement to influxTopic
                 influxLine.concat(influxTags + " " + influxFields);
                 Serial.println(influxLine);
-                client.publish(influxTopic, influxLine.c_str(), true);
+                client.publish(influx_topic.c_str(), influxLine.c_str(), true);
 
                 if (publishGas) {
                     // post influx gas measurement to influxTopic
                     influxGasLine.concat(influxGasTags + " " + influxGasFields);
                     Serial.println(influxGasLine);
-                    client.publish(influxTopic, influxGasLine.c_str(), true);
+                    client.publish(influx_topic.c_str(), influxGasLine.c_str(), true);
                 }
             #endif
 
@@ -338,39 +360,63 @@ void appendInfluxValue(String* influxString, char* column_name, String value, bo
 
 // WiFi and MQTT setup functions
 
-void setupWifi()
-{
-    delay(10);
-    // Connect to WiFi network
-    Serial.printf("\nConnecting to %s ", ssid);
+void setup_wifi() {
+    WiFiSettings.hostname = printf("%s-%06" PRIx32, d_client_id, ESP.getChipId());
 
-    WiFi.begin(ssid, password);
-    WiFi.mode(WIFI_STA);
+    mqtt_host = WiFiSettings.string("mqtt-host", d_mqtt_host, "MQTT server host");
+    mqtt_port = WiFiSettings.integer("mqtt-port", d_mqtt_port, "MQTT server port");
+    mqtt_notify_topic = WiFiSettings.string("mqtt-notify-topic", d_notify_topic, "MQTT connect notification topic");
 
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
+    #ifdef INFLUX
+        influx_topic =
+            WiFiSettings.string("influx-topic", d_influx_topic, "Influx MQTT topic");
+        influx_electricity_measurement =
+            WiFiSettings.string("influx-electricity-measurement", d_influx_electricity_measurement, "Influx electricity measurement");
+        influx_gas_measurement =
+            WiFiSettings.string("influx-gas-measurement", d_influx_gas_measurement, "Influx gas measurement");
+    #endif
 
-    Serial.println("\nWiFi connected");
-    Serial.printf("IP address: %s\n", WiFi.localIP().toString().c_str());
+    interval = WiFiSettings.integer("fetch-interval", 10, 3600, d_interval, "Measuring interval");
+    timeout = WiFiSettings.integer("fetch-timeout", 10, 120, d_timeout, "Timeout to portal");
+
+    interval *= 1000;   // seconds -> milliseconds
+    timeout *= 1000;
+
+    WiFiSettings.onPortal = []() {
+        setup_ota();
+    };
+    WiFiSettings.onPortalWaitLoop = []() {
+        ArduinoOTA.handle();
+    };
+
+    WiFiSettings.connect();
+
+    Serial.print("Password: ");
+    Serial.println(WiFiSettings.password);
 }
 
-void reconnect()
+void setup_ota()
+{
+    ArduinoOTA.setHostname(WiFiSettings.hostname.c_str());
+    ArduinoOTA.setPassword(WiFiSettings.password.c_str());
+    ArduinoOTA.begin();
+}
+
+void connect_mqtt()
 {
     int connLoseMillis = millis();
     // Loop until connected
     while (!client.connected()) {
         Serial.print("Attempting MQTT connection...");
 
-        if (client.connect(clientID)) { // Attempt to connect
+        if (client.connect(WiFiSettings.hostname.c_str())) { // Attempt to connect
             Serial.println("connected");
 
             // Post connect message to MQTT topic once connected
             int connectMillis = millis();
             float lostSeconds = (connectMillis - connLoseMillis) / 1000;
-            sprintf(msg, "%s (re)connected after %.1f", clientID, lostSeconds);
-            client.publish(connTopic, msg);
+            sprintf(msg, "%s (re)connected after %.1f", WiFiSettings.hostname.c_str(), lostSeconds);
+            client.publish(mqtt_notify_topic.c_str(), msg);
             Serial.println(msg);
 
         } else {

@@ -32,9 +32,11 @@ When using PlatformIO, *this will be taken care of by the included `platformio.i
  otherwise you must edit the library file.
 
 ## Dependencies
-CRC16 library retrieved from [vinmenn/Crc16] on Github
+* CRC16 library retrieved from [vinmenn/Crc16] on Github
+* [ESP-WiFiSettings] library
 
 [vinmenn/Crc16]: https://github.com/vinmenn/Crc16
+[ESP-WiFiSettings]: https://platformio.org/lib/show/7251/ESP-WiFiSettings
 
 ## Developing / contributing
 If you want to work on, derive from, or tinker with this firmware or its functionality,
