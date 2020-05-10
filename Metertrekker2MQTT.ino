@@ -41,6 +41,10 @@ long lastTelegram;
 unsigned int interval;
 unsigned int timeout;
 
+// Declare slurp() and spurt(); definition in WiFiSettings.cpp
+String slurp(const String& fn);                         // Read file and return content
+void spurt(const String& fn, const String& content);    // Write content to file
+
 void setup()
 {
     Serial.begin(115200);
@@ -140,7 +144,7 @@ bool verifyTelegram(const byte* telegram, const char* checkCRC)
 }
 
 
-String lastGasTimestamp = "", lastTextMessage = "";
+String lastTextMessage = "";
 
 void parseTelegram(char* telegram)
 {
@@ -235,9 +239,9 @@ void parseTelegram(char* telegram)
                             gasTimestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')'));
                             Serial.printf("\t@{%s}\n", gasTimestamp.c_str());
 
-                            publishGas = allowPublish = (gasTimestamp > lastGasTimestamp);
+                            publishGas = allowPublish = (gasTimestamp > slurp("/last-gas-timestamp"));
 
-                            lastGasTimestamp = gasTimestamp;
+                            spurt("/last-gas-timestamp", gasTimestamp);
 
                             value.replace("*", " ");
 
@@ -333,7 +337,7 @@ void parseTelegram(char* telegram)
 
 }
 
-
+// Get metric definition as defined in settings.h
 metricDef* getMetricDef(const char* ident)
 {
     for (size_t i = 0; i < sizeof(metricDefs)/sizeof(metricDefs[0]); i++)
@@ -345,15 +349,12 @@ metricDef* getMetricDef(const char* ident)
     return NULL;
 }
 
-
 #ifdef INFLUX
+// Append a metric to an influx line-format string
 void appendInfluxValue(String* influxString, char* column_name, String value, bool valueIsString)
 {
     influxString->concat(column_name);
-    if (valueIsString)
-        influxString->concat("=\"" + value + "\",");
-    else
-        influxString->concat('=' + value + ',');
+    influxString->concat(valueIsString ? "=\"" + value + "\"," : '=' + value + ',');
 }
 #endif
 
