@@ -11,7 +11,7 @@ Crc16 CRC;
 #include "settings.h"
 
 WiFiClient espClient;
-PubSubClient client(espClient);
+PubSubClient mqtt_client(espClient);
 
 String mqtt_host;
 int mqtt_port;
@@ -36,6 +36,8 @@ SoftwareSerial P1(RX_PIN, RX_PIN, true);
 String slurp(const String& fn);                         // Read file and return content
 void spurt(const String& fn, const String& content);    // Write content to file
 
+#define Sprintf(f, ...) ({ char* s; asprintf(&s, f, __VA_ARGS__); String r = s; free(s); r; })
+
 long lastTelegram;
 unsigned int interval;
 unsigned int timeout;
@@ -44,6 +46,9 @@ void setup()
 {
     Serial.begin(115200);
     Serial.setTimeout(100);
+
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
 
     LittleFS.begin();  // Will format on the first run after failing to mount
     setup_wifi();
@@ -57,22 +62,23 @@ void setup()
     pinMode(RTS_PIN, OUTPUT);
     digitalWrite(RTS_PIN, RTS_LOW);
 
-    client.setServer(mqtt_host.c_str(), mqtt_port);
-    // client.setCallback(callback);
+    mqtt_client.setServer(mqtt_host.c_str(), mqtt_port);
+    // mqtt_client.setCallback(callback);
 }
 
 
 byte bufferIn[768];
-int readLength;
+size_t readLength;
 char receivedCRC[5];
 
 void loop()
 {
-    // WiFi and MQTT stuff
-    if (!client.connected()) {
+    ArduinoOTA.handle();
+
+    if (!mqtt_client.connected()) {
         connect_mqtt();
     }
-    client.loop();
+    mqtt_client.loop();
 
     if (millis() - lastTelegram > interval) {
         if (P1.available() > 0) {     // check for incoming serial data
@@ -105,6 +111,7 @@ void loop()
 
         } else {
             if (millis() - lastTelegram - interval > timeout) {
+                Serial.println("Timeout, starting portal");
                 WiFiSettings.portal();
             }
 
@@ -127,8 +134,10 @@ void requestTelegram()
 {
     Serial.println("Requesting telegram...");
     digitalWrite(RTS_PIN, RTS_HIGH);
+    digitalWrite(LED_BUILTIN, LOW);
     delay(100);
     digitalWrite(RTS_PIN, RTS_LOW);
+    digitalWrite(LED_BUILTIN, HIGH);
 }
 
 
@@ -201,13 +210,13 @@ void parseTelegram(char* telegram)
                 // post influx electricity measurement to influxTopic
                 influxLine.concat(influxTags + " " + influxFields);
                 Serial.println(influxLine);
-                client.publish(influx_topic.c_str(), influxLine.c_str(), true);
+                mqtt_client.publish(influx_topic.c_str(), influxLine.c_str(), true);
 
                 if (publishGas) {
                     // post influx gas measurement to influxTopic
                     influxGasLine.concat(influxGasTags + " " + influxGasFields);
                     Serial.println(influxGasLine);
-                    client.publish(influx_topic.c_str(), influxGasLine.c_str(), true);
+                    mqtt_client.publish(influx_topic.c_str(), influxGasLine.c_str(), true);
                 }
             #endif
 
@@ -325,7 +334,7 @@ void parseTelegram(char* telegram)
 
                     if (allowPublish && strlen(metric->topic) > 0) {
                         Serial.printf("%s %s\n", metric->topic, value.c_str());
-                        client.publish(metric->topic, value.c_str(), true);
+                        mqtt_client.publish(metric->topic, value.c_str(), true);
                     }
                 } else {
                     Serial.printf("NOTIFY: unknown OBIS identity: %s\n", ident.c_str());
@@ -362,7 +371,7 @@ void appendInfluxValue(String* influxString, char* column_name, String value, bo
 // WiFi and MQTT setup functions
 
 void setup_wifi() {
-    WiFiSettings.hostname = printf("%s-%06" PRIx32, d_client_id, ESP.getChipId());
+    WiFiSettings.hostname = Sprintf("%s-%06" PRIx32, d_client_id, ESP.getChipId());
 
     mqtt_host = WiFiSettings.string("mqtt-host", d_mqtt_host, "MQTT server host");
     mqtt_port = WiFiSettings.integer("mqtt-port", d_mqtt_port, "MQTT server port");
@@ -388,6 +397,11 @@ void setup_wifi() {
     };
     WiFiSettings.onPortalWaitLoop = []() {
         ArduinoOTA.handle();
+
+        if (!(millis() % 200))
+            digitalWrite(LED_BUILTIN, LOW);
+        else if (!(millis() % 100))
+            digitalWrite(LED_BUILTIN, HIGH);
     };
 
     WiFiSettings.connect();
@@ -408,21 +422,21 @@ void connect_mqtt()
     char msg[50];
     int connLoseMillis = millis();
 
-    while (!client.connected()) {   // Loop until connected
+    while (!mqtt_client.connected()) {   // Loop until connected
         Serial.print("Attempting MQTT connection...");
 
-        if (client.connect(WiFiSettings.hostname.c_str())) { // Attempt to connect
+        if (mqtt_client.connect(WiFiSettings.hostname.c_str())) { // Attempt to connect
             Serial.println("connected");
 
             // Post connect message to MQTT topic once connected
             int connectMillis = millis();
             float lostSeconds = (connectMillis - connLoseMillis) / 1000;
-            sprintf(msg, "%s (re)connected after %.1f", WiFiSettings.hostname.c_str(), lostSeconds);
-            client.publish(mqtt_notify_topic.c_str(), msg);
+            sprintf(msg, "%s (re)connected after %.1fs", WiFiSettings.hostname.c_str(), lostSeconds);
+            mqtt_client.publish(mqtt_notify_topic.c_str(), msg);
             Serial.println(msg);
 
         } else {
-            Serial.printf("failed, rc=%d; try again in 5 seconds", client.state());
+            Serial.printf("failed, rc=%d; try again in 5 seconds", mqtt_client.state());
             delay(5000);  // Wait 5 seconds before retrying
         }
     }
