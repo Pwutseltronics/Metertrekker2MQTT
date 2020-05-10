@@ -95,5 +95,6 @@ metricDef metricDefs[] = {
   { "1-0:72.36.0",  METRIC_TYPE_BARE,   "L3_swells",      "my_mqtt_root/energy/mains/report/voltage_swells/L3",     "L3 voltage swells" },
   #endif
 
-  { "0-0:96.13.0",  METRIC_TYPE_TEXT,   "message",   "my_mqtt_root/energy/mains/message",   "text message" }  // text message
+  { "0-0:96.13.0",  METRIC_TYPE_TEXT,   "message",   "my_mqtt_root/energy/mains/message",   "text message" }, // text message
+  { "0-0:96.13.1",  METRIC_TYPE_TEXT,   "message",   "my_mqtt_root/energy/mains/message",   "text message" }  // text message
 };
