@@ -1,4 +1,5 @@
 #include <WiFiSettings.h>
+#include <LittleFS.h>
 #include <WiFiClient.h>
 #include <PubSubClient.h>
 #include <SoftwareSerial.h>
@@ -44,6 +45,8 @@ void setup()
 {
     Serial.begin(115200);
     Serial.setTimeout(100);
+
+    LittleFS.begin();  // Will format on the first run after failing to mount
     setup_wifi();
 
     pinMode(RX_PIN, INPUT);
