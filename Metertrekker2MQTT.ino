@@ -1,8 +1,5 @@
 #include <ESP8266WiFi.h>
-
 #include <PubSubClient.h>
-// To use PubSubClient with influx publishing enabled, the MAX_PACKET_SIZE constant in PubSubClient.h must be set to at least 1024 (to be sure)
-
 #include <SoftwareSerial.h>
 
 #include "Crc16.h"
@@ -14,16 +11,12 @@ byte bufferIn[768];
 int readLength;
 char receivedCRC[5];
 
-/* Valid telegram for testing purposes */
-// byte bufferIn[768] = "/ISK5\\2M550E-1012\r\n\r\n1-3:0.2.8(50)\r\n0-0:1.0.0(190827155511S)\r\n0-0:96.1.1(4D455445525F53455249414C235F484558)\r\n1-0:1.8.1(000057.460*kWh)\r\n1-0:1.8.2(000037.300*kWh)\r\n1-0:2.8.1(000000.000*kWh)\r\n1-0:2.8.2(000000.000*kWh)\r\n0-0:96.14.0(0002)\r\n1-0:1.7.0(00.498*kW)\r\n1-0:2.7.0(00.000*kW)\r\n0-0:96.7.21(00008)\r\n0-0:96.7.9(00002)\r\n1-0:99.97.0()\r\n1-0:32.32.0(00005)\r\n1-0:32.36.0(00001)\r\n0-0:96.13.0()\r\n1-0:32.7.0(235.4*V)\r\n1-0:31.7.0(002*A)\r\n1-0:21.7.0(00.454*kW)\r\n1-0:22.7.0(00.000*kW)\r\n0-1:24.1.0(003)\r\n0-1:96.1.0(4D455445525F53455249414C235F484558)\r\n0-1:24.2.1(190827155507S)(00004.380*m3)\r\n!";
-// int readLength = strlen((char*)bufferIn);
-// char receivedCRC[5] = "ECDF";
-
 WiFiClient espClient;
 PubSubClient client(espClient);
 char msg[50];
 
-SoftwareSerial P1(SoftRx, SoftRx, true);  // Tx pin must be specified but is overwritten if Rx pin is the same, thus disabling Tx
+// Tx pin must be specified but is overwritten if Rx pin is the same, thus disabling Tx
+SoftwareSerial P1(SoftRx, SoftRx, true);
 
 #ifdef RTS_INVERT_LOGIC
     #define RTS_HIGH LOW
@@ -33,7 +26,7 @@ SoftwareSerial P1(SoftRx, SoftRx, true);  // Tx pin must be specified but is ove
     #define RTS_LOW LOW
 #endif
 
-int lastTelegram = -15000;
+int lastTelegram = -15000;  // time of last telegram reception
 
 void setup()
 {
@@ -68,17 +61,14 @@ void loop()
 
                 Serial.println("Telegram received!");
 
-                Serial.print("telegram length: ");
-                Serial.println(readLength);
+                Serial.printf("telegram length: %zu\n", readLength);
 
                 P1.readBytes(receivedCRC, 4);
                 receivedCRC[4] = 0;
-                Serial.print("read CRC: ");
-                Serial.println(receivedCRC);
+                Serial.printf("read CRC: %s\n", receivedCRC);
 
                 if (verifyTelegram(bufferIn, receivedCRC)) {
-                    Serial.println("Telegram valid!");
-                    Serial.println();
+                    Serial.print("Telegram valid!\n\n");
 
                     lastTelegram = millis();
                     parseTelegram((char*)bufferIn);
@@ -122,8 +112,7 @@ bool verifyTelegram(const byte* telegram, const char* checkCRC)
 
     sprintf(calculatedCRC, "%X", CRC.fastCrc((uint8_t*)telegram, 0, readLength, true, true, 0x8005, 0x0000, 0x0000, 0x8000, 0xffff));
 
-    Serial.print("calculated CRC: ");
-    Serial.println(calculatedCRC);
+    Serial.printf("calculated CRC: %s\n", calculatedCRC);
 
     return strncmp(calculatedCRC, checkCRC, 4) == 0;
 }
@@ -167,7 +156,7 @@ void parseTelegram(char* telegram)
     lineptr = strtok(telegram, "\r\n");
     line = String(lineptr);   // TODO: need to do anything with the device model header?
 
-    Serial.print(line + "\n\n");
+    Serial.printf("%s\n\n", line.c_str());
 
     while (lineptr = strtok(NULL, "\r\n")) {
         line = String(lineptr);
@@ -199,18 +188,14 @@ void parseTelegram(char* telegram)
             break;
         }
 
-        Serial.print(++i);
-        Serial.print(": ");
-        Serial.print(line);
+        Serial.printf("%d: %s\n", ++i, line.c_str());
 
         if (line.length() >= 8) {
             allowPublish = true;
 
             if (line.lastIndexOf('(') != -1) {
                 value = line.substring(line.lastIndexOf('(') + 1, line.lastIndexOf(')'));
-
                 ident = line.substring(0, line.indexOf('('));
-
                 metric = getMetricDef(ident.c_str());
 
                 if (metric != NULL) {
@@ -226,7 +211,7 @@ void parseTelegram(char* telegram)
 
                         case METRIC_TYPE_GAS:
                             gasTimestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')'));
-                            Serial.print("\t@{" + gasTimestamp + "}");
+                            Serial.printf("\t@{%s}\n", gasTimestamp.c_str());
 
                             publishGas = allowPublish = (gasTimestamp > lastGasTimestamp);
 
@@ -310,15 +295,11 @@ void parseTelegram(char* telegram)
                 }
 
                 if (strlen(metric->description) > 0) {
-                    Serial.print("  -> ");
-                    Serial.print(metric->description);
-                    Serial.println(" [" + value + "]");
+                    Serial.printf("  -> %s [%s]\n", metric->description, value.c_str());
                 }
 
                 if (allowPublish && strlen(metric->topic) > 0) {
-                    Serial.print(metric->topic);
-                    Serial.print(' ');
-                    Serial.println(value.c_str());
+                    Serial.printf("%s %s\n", metric->topic, value.c_str());
                     client.publish(metric->topic, value.c_str(), true);
                 }
             }
@@ -351,15 +332,13 @@ void appendInfluxValue(String* influxString, char* column_name, String value, bo
 }
 
 
-// WiFi set-up and MQTT reconnect functions
+// WiFi and MQTT setup functions
 
 void setupWifi()
 {
     delay(10);
     // Connect to WiFi network
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
+    Serial.printf("\nConnecting to %s ", ssid);
 
     WiFi.begin(ssid, password);
     WiFi.mode(WIFI_STA);
@@ -369,10 +348,8 @@ void setupWifi()
         Serial.print(".");
     }
 
-    Serial.println();
-    Serial.println("WiFi connected");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
+    Serial.println("\nWiFi connected");
+    Serial.printf("IP address: %s\n", WiFi.localIP().toString().c_str());
 }
 
 void reconnect()
@@ -393,10 +370,7 @@ void reconnect()
             Serial.println(msg);
 
         } else {
-            Serial.print("failed, rc=");
-            Serial.print(client.state());
-            Serial.println(" try again in 5 seconds");
-
+            Serial.printf("failed, rc=%d; try again in 5 seconds", client.state());
             delay(5000);  // Wait 5 seconds before retrying
         }
     }
