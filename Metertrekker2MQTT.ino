@@ -1,5 +1,6 @@
 #include <WiFiSettings.h>
 #include <LittleFS.h>
+#include <ArduinoOTA.h>
 #include <WiFiClient.h>
 #include <PubSubClient.h>
 #include <SoftwareSerial.h>
@@ -48,6 +49,7 @@ void setup()
 
     LittleFS.begin();  // Will format on the first run after failing to mount
     setup_wifi();
+    setup_ota();
 
     pinMode(RX_PIN, INPUT);
     P1.begin(115200);
@@ -63,7 +65,7 @@ void loop()
 {
     // WiFi and MQTT stuff
     if (!client.connected()) {
-        reconnect();
+        connect_mqtt();
     }
     client.loop();
 
@@ -367,13 +369,27 @@ void setup_wifi() {
 
     interval = WiFiSettings.integer("fetch-interval", 10, 3600, d_interval, "Measuring interval")*1000;
 
+    WiFiSettings.onPortal = []() {
+        setup_ota();
+    };
+    WiFiSettings.onPortalWaitLoop = []() {
+        ArduinoOTA.handle();
+    };
+
     WiFiSettings.connect();
 
     Serial.print("Password: ");
     Serial.println(WiFiSettings.password);
 }
 
-void reconnect()
+void setup_ota()
+{
+    ArduinoOTA.setHostname(WiFiSettings.hostname.c_str());
+    ArduinoOTA.setPassword(WiFiSettings.password.c_str());
+    ArduinoOTA.begin();
+}
+
+void connect_mqtt()
 {
     int connLoseMillis = millis();
     // Loop until connected
