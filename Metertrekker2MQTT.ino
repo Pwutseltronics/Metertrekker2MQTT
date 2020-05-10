@@ -292,15 +292,17 @@ void parseTelegram(char* telegram)
 
                             break;
                     }
-                }
 
-                if (strlen(metric->description) > 0) {
-                    Serial.printf("  -> %s [%s]\n", metric->description, value.c_str());
-                }
+                    if (strlen(metric->description) > 0) {
+                        Serial.printf("  -> %s [%s]\n", metric->description, value.c_str());
+                    }
 
-                if (allowPublish && strlen(metric->topic) > 0) {
-                    Serial.printf("%s %s\n", metric->topic, value.c_str());
-                    client.publish(metric->topic, value.c_str(), true);
+                    if (allowPublish && strlen(metric->topic) > 0) {
+                        Serial.printf("%s %s\n", metric->topic, value.c_str());
+                        client.publish(metric->topic, value.c_str(), true);
+                    }
+                } else {
+                    Serial.printf("NOTIFY: unknown OBIS identity: %s\n", ident.c_str());
                 }
             }
         }
@@ -322,6 +324,7 @@ metricDef* getMetricDef(const char* ident)
 }
 
 
+#ifdef INFLUX
 void appendInfluxValue(String* influxString, char* column_name, String value, bool valueIsString)
 {
     influxString->concat(column_name);
@@ -330,6 +333,7 @@ void appendInfluxValue(String* influxString, char* column_name, String value, bo
     else
         influxString->concat('=' + value + ',');
 }
+#endif
 
 
 // WiFi and MQTT setup functions
