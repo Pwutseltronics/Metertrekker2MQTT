@@ -1,3 +1,5 @@
+/* *** Default settings, adjustable in portal *** */
+
 /* MQTT stuff */
 const char* d_mqtt_host  = "MQTT_SERV_IP";
 const int   d_mqtt_port  = 1883;
@@ -13,10 +15,19 @@ const char* d_notify_topic = "my_mqtt_root/debug/node_connect";
   const char* d_influx_gas_measurement = "gas";
 #endif
 
-/* Telegram request interval */
+/* Default telegram request interval and timeout
+ *
+ * d_interval: default telegram request interval in seconds
+ * d_timeout:  after d_timeout seconds of retrying to get a telegram,
+ *             the portal will be started */
 const unsigned int d_interval = 15;
+const unsigned int d_timeout = d_interval;
 
-/* To invert the RTS output logic, e.g. to use with an output inverter when the GPIO output is too low, uncomment this line: */
+
+/* *** Firmware configuration *** */
+
+/* To invert the RTS output logic, e.g. to use with an output inverter
+ * when the GPIO output is too low, uncomment this line: */
 #define RTS_INVERT_LOGIC
 #define RTS_PIN D3
 

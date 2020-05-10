@@ -23,9 +23,7 @@ int mqtt_port;
 String mqtt_notify_topic;
 
 #ifdef INFLUX
-    String influx_topic;
-    String influx_electricity_measurement;
-    String influx_gas_measurement;
+    String influx_topic, influx_electricity_measurement, influx_gas_measurement;
 #endif
 
 // Tx pin must be specified but is overwritten if Rx pin is the same, thus disabling Tx
@@ -39,8 +37,9 @@ SoftwareSerial P1(RX_PIN, RX_PIN, true);
     #define RTS_LOW LOW
 #endif
 
-unsigned long lastTelegram = -15000;  // time of last telegram reception
+long lastTelegram;
 unsigned int interval;
+unsigned int timeout;
 
 void setup()
 {
@@ -50,6 +49,8 @@ void setup()
     LittleFS.begin();  // Will format on the first run after failing to mount
     setup_wifi();
     setup_ota();
+
+    lastTelegram = -interval;
 
     pinMode(RX_PIN, INPUT);
     P1.begin(115200);
@@ -99,6 +100,10 @@ void loop()
             } else P1.read();
 
         } else {
+            if (millis() - lastTelegram - interval > timeout) {
+                WiFiSettings.portal();
+            }
+
             requestTelegram();
 
             Serial.print("Waiting for telegram");
@@ -367,7 +372,11 @@ void setup_wifi() {
             WiFiSettings.string("influx-gas-measurement", d_influx_gas_measurement, "Influx gas measurement");
     #endif
 
-    interval = WiFiSettings.integer("fetch-interval", 10, 3600, d_interval, "Measuring interval")*1000;
+    interval = WiFiSettings.integer("fetch-interval", 10, 3600, d_interval, "Measuring interval");
+    timeout = WiFiSettings.integer("fetch-timeout", 10, 120, d_timeout, "Timeout to portal");
+
+    interval *= 1000;   // seconds -> milliseconds
+    timeout *= 1000;
 
     WiFiSettings.onPortal = []() {
         setup_ota();
