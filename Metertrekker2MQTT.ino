@@ -13,23 +13,20 @@ Crc16 CRC;
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
 
+
+/* The following settings can be set in the WiFi portal but default to values in settings.h */
+
 String mqtt_host;
 int mqtt_port;
+String mqtt_topic_root;
 String mqtt_notify_topic;
 
 #ifdef INFLUX
     String influx_topic, influx_electricity_measurement, influx_gas_measurement;
 #endif
 
-SoftwareSerial P1;
 
-#ifdef RTS_INVERT_LOGIC
-    #define RTS_HIGH LOW
-    #define RTS_LOW HIGH
-#else
-    #define RTS_HIGH HIGH
-    #define RTS_LOW LOW
-#endif
+SoftwareSerial P1;
 
 // Send RTS signal (and set LED correspondingly)
 void set_RTS(bool s)
@@ -195,14 +192,14 @@ void parseTelegram(char* telegram)
         influxGasTags.concat(',');
     #endif
 
-    Serial.print(F("==== START OF TELEGRAM ====\n\n"));
+    Serial.print(F("==== START OF TELEGRAM ====\r\n\n"));
 
     lineptr = strtok(telegram, "\r\n");
     line = String(lineptr);   // TODO: need to do anything with the device model header?
 
     Serial.printf("%s\r\n\n", line.c_str());
 
-    while (lineptr = strtok(NULL, "\r\n")) {
+    while ((lineptr = strtok(NULL, "\r\n"))) {
         line = String(lineptr);
 
         if (line.charAt(0) == '!') {
@@ -219,13 +216,13 @@ void parseTelegram(char* telegram)
                 // post influx electricity measurement to influxTopic
                 influxLine.concat(influxTags + " " + influxFields);
                 Serial.println(influxLine);
-                mqtt_client.publish(influx_topic.c_str(), influxLine.c_str(), true);
+                mqtt_publish(influx_topic, influxLine, true);
 
                 if (publishGas) {
                     // post influx gas measurement to influxTopic
                     influxGasLine.concat(influxGasTags + " " + influxGasFields);
                     Serial.println(influxGasLine);
-                    mqtt_client.publish(influx_topic.c_str(), influxGasLine.c_str(), true);
+                    mqtt_publish(influx_topic, influxGasLine, true);
                 }
             #endif
 
@@ -344,9 +341,9 @@ void parseTelegram(char* telegram)
                         Serial.printf("  -> %s [%s]\r\n", metric->description, value.c_str());
                     }
 
-                    if (allowPublish && strlen(metric->topic) > 0) {
-                        Serial.printf("%s %s\r\n", metric->topic, value.c_str());
-                        mqtt_client.publish(metric->topic, value.c_str(), true);
+                    if (allowPublish && strlen(metric->mqtt_path) > 0) {
+                        Serial.printf("%s %s\r\n", metric->mqtt_path, value.c_str());
+                        mqtt_publish(metric->mqtt_path, value, true);
                     }
                 } else {
                     Serial.printf("NOTIFY: unknown OBIS identity: %s\r\n", ident.c_str());
@@ -370,6 +367,12 @@ metricDef* getMetricDef(const char* ident)
     return NULL;
 }
 
+// Publish a message to an MQTT topic
+bool mqtt_publish(const String topic_path, const String message, bool retain)
+{
+    return mqtt_client.publish((mqtt_topic_root + topic_path).c_str(), message.c_str(), retain);
+}
+
 #ifdef INFLUX
 // Append a metric to an influx line-format string
 void appendInfluxValue(String* influxString, char* column_name, String value, bool valueIsString)
@@ -383,10 +386,11 @@ void appendInfluxValue(String* influxString, char* column_name, String value, bo
 // WiFi and MQTT setup functions
 
 void setup_wifi() {
-    WiFiSettings.hostname = Sprintf("%s-%06" PRIx32, d_client_id, ESP.getChipId());
+    WiFiSettings.hostname = Sprintf("%s-%06" PRIx32, client_id, ESP.getChipId());
 
     mqtt_host = WiFiSettings.string("mqtt-host", d_mqtt_host, F("MQTT server host"));
     mqtt_port = WiFiSettings.integer("mqtt-port", d_mqtt_port, F("MQTT server port"));
+    mqtt_topic_root = WiFiSettings.string("mqtt-root", d_mqtt_topic_root, F("MQTT topic root"));
     mqtt_notify_topic = WiFiSettings.string("mqtt-notify-topic", d_notify_topic, F("MQTT connect notification topic"));
 
     #ifdef INFLUX
@@ -445,7 +449,7 @@ void connect_mqtt()
             int connectMillis = millis();
             float lostSeconds = (connectMillis - connLoseMillis) / 1000;
             sprintf(msg, "%s (re)connected after %.1fs", WiFiSettings.hostname.c_str(), lostSeconds);
-            mqtt_client.publish(mqtt_notify_topic.c_str(), msg);
+            mqtt_publish(mqtt_notify_topic, msg, false);
             Serial.println(msg);
 
         } else {
