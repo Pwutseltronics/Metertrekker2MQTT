@@ -21,8 +21,7 @@ String mqtt_notify_topic;
     String influx_topic, influx_electricity_measurement, influx_gas_measurement;
 #endif
 
-// Tx pin must be specified but is overwritten if Rx pin is the same, thus disabling Tx
-SoftwareSerial P1(RX_PIN, RX_PIN, true);
+SoftwareSerial P1;
 
 #ifdef RTS_INVERT_LOGIC
     #define RTS_HIGH LOW
@@ -31,6 +30,12 @@ SoftwareSerial P1(RX_PIN, RX_PIN, true);
     #define RTS_HIGH HIGH
     #define RTS_LOW LOW
 #endif
+
+void set_RTS(bool s)
+{
+    digitalWrite(RTS_PIN, s ? RTS_HIGH : RTS_LOW);
+    digitalWrite(LED_BUILTIN, !s);
+}
 
 // Declare slurp() and spurt(); definition in WiFiSettings.cpp
 String slurp(const String& fn);                         // Read file and return content
@@ -45,7 +50,6 @@ unsigned int timeout;
 void setup()
 {
     Serial.begin(115200);
-    Serial.setTimeout(100);
 
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, HIGH);
@@ -54,10 +58,10 @@ void setup()
     setup_wifi();
     setup_ota();
 
-    lastTelegram = -interval;
+    P1.begin(115200, SWSERIAL_8N1, RX_PIN, -1, true, 768);  // Tx disabled
+    P1.setTimeout(50);
 
-    pinMode(RX_PIN, INPUT);
-    P1.begin(115200);
+    lastTelegram = -interval;
 
     pinMode(RTS_PIN, OUTPUT);
     digitalWrite(RTS_PIN, RTS_LOW);
@@ -67,7 +71,7 @@ void setup()
 }
 
 
-byte bufferIn[768];
+char bufferIn[768];
 size_t readLength;
 char receivedCRC[5];
 
@@ -81,50 +85,43 @@ void loop()
     mqtt_client.loop();
 
     if (millis() - lastTelegram > interval) {
-        if (P1.available() > 0) {     // check for incoming serial data
+        if (!P1.available())  requestTelegram();
+
+        while (P1.available()) {
             if (P1.peek() == '/') {     // check for telegram header
                 readLength = P1.readBytesUntil('!', bufferIn, 766);
                 bufferIn[readLength++] = '!';
                 bufferIn[readLength] = 0;
+                set_RTS(LOW);
 
-                Serial.println("Telegram received!");
-
-                Serial.printf("telegram length: %zu\n", readLength);
+                Serial.printf("Telegram length: %zu\n", readLength);
 
                 P1.readBytes(receivedCRC, 4);
                 receivedCRC[4] = 0;
-                Serial.printf("read CRC: %s\n", receivedCRC);
+                Serial.printf("read CRC: %s\r\n", receivedCRC);
 
-                if (verifyTelegram(bufferIn, receivedCRC)) {
-                    Serial.print("Telegram valid!\n\n");
+                if (verifyTelegram((byte*)bufferIn, receivedCRC)) {
+                    Serial.print("Telegram valid!\r\n\n");
 
                     lastTelegram = millis();
-                    parseTelegram((char*)bufferIn);
+                    parseTelegram(bufferIn);
+                    Serial.printf("Free heap: %zu bytes\r\n", ESP.getFreeHeap());
                 } else {
                     Serial.println("Telegram NOT valid!");
-                    delay(200);
+                    Serial.println("\nTELEGRAM >>>>>>");
+                    Serial.println(bufferIn);
+                    Serial.print("<<<<<< TELEGRAM\r\n\n");
+                    delay(400);
                 }
 
                 Serial.println();
 
             } else P1.read();
+        }
 
-        } else {
-            if (millis() - lastTelegram - interval > timeout) {
-                Serial.println("Timeout, starting portal");
-                WiFiSettings.portal();
-            }
-
-            requestTelegram();
-
-            Serial.print("Waiting for telegram");
-            for (int i = 0; i < 20; i++) {
-                if (P1.available() > 0)  break;
-
-                Serial.print('.');
-                delay(15);
-            }
-            Serial.print("\n\n");
+        if (millis() - lastTelegram > interval + timeout) {
+            Serial.println("Timeout, starting portal");
+            WiFiSettings.portal();
         }
     } else if (P1.available() > 0)  P1.read(); // discard serial input
 }
@@ -133,11 +130,14 @@ void loop()
 void requestTelegram()
 {
     Serial.println("Requesting telegram...");
-    digitalWrite(RTS_PIN, RTS_HIGH);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(100);
-    digitalWrite(RTS_PIN, RTS_LOW);
-    digitalWrite(LED_BUILTIN, HIGH);
+    set_RTS(HIGH);
+
+    Serial.print("Waiting for telegram");
+    while (!P1.available()) {
+        delayMicroseconds(100);
+        Serial.print('.');
+    }
+    Serial.print("\r\n\n");
 }
 
 
@@ -145,19 +145,17 @@ bool verifyTelegram(const byte* telegram, const char* checkCRC)
 {
     char calculatedCRC[5] = "";
 
-    sprintf(calculatedCRC, "%X", CRC.fastCrc((uint8_t*)telegram, 0, readLength, true, true, 0x8005, 0x0000, 0x0000, 0x8000, 0xffff));
+    sprintf(calculatedCRC, "%4X", CRC.fastCrc((uint8_t*)telegram, 0, readLength, true, true, 0x8005, 0x0000, 0x0000, 0x8000, 0xffff));
 
-    Serial.printf("calculated CRC: %s\n", calculatedCRC);
+    Serial.printf("calculated CRC: %s\r\n", calculatedCRC);
 
     return strncmp(calculatedCRC, checkCRC, 4) == 0;
 }
 
 
-String lastTextMessage = "";
-
 void parseTelegram(char* telegram)
 {
-    int i = 0;
+    int ln = 0;
     char *lineptr;
     String line, ident, value, tmpValue, timestamp, gasTimestamp;
     bool timestampDST, gasTimestampDST;
@@ -191,7 +189,7 @@ void parseTelegram(char* telegram)
     lineptr = strtok(telegram, "\r\n");
     line = String(lineptr);   // TODO: need to do anything with the device model header?
 
-    Serial.printf("%s\n\n", line.c_str());
+    Serial.printf("%s\r\n\n", line.c_str());
 
     while (lineptr = strtok(NULL, "\r\n")) {
         line = String(lineptr);
@@ -223,7 +221,7 @@ void parseTelegram(char* telegram)
             break;
         }
 
-        Serial.printf("%d: %s\n", ++i, line.c_str());
+        Serial.printf("%d: %s", ++ln, line.c_str());
 
         if (line.length() >= 8) {
             allowPublish = true;
@@ -246,7 +244,7 @@ void parseTelegram(char* telegram)
 
                         case METRIC_TYPE_GAS:
                             gasTimestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')'));
-                            Serial.printf("\t@{%s}\n", gasTimestamp.c_str());
+                            Serial.printf("\t@{%s}\r\n", gasTimestamp.c_str());
 
                             publishGas = allowPublish = (gasTimestamp > slurp("/last-gas-timestamp"));
 
@@ -279,20 +277,23 @@ void parseTelegram(char* telegram)
 
                         case METRIC_TYPE_TEXT:
                         case METRIC_TYPE_META_TEXT:
-                            tmpValue = "";
                             tmpValue.reserve(value.length()/2);
 
-                            for (size_t i = 0; i < value.length()/2; i++) {
+                            for (unsigned int i = 0; i < value.length()/2; i++) {
                                 value.substring(i*2).getBytes(hexbuf, 3);
                                 hexbuf[2] = 0;
 
                                 tmpValue.concat((char)strtol((char*)hexbuf, NULL, 16));
                             }
                             value = tmpValue;
+                            tmpValue.clear();
 
                             if (metric->type == METRIC_TYPE_TEXT) {
+                                allowPublish = value == slurp("/last-" + String(metric->influx_column));
+                                if (allowPublish) spurt("/last-" + String(metric->influx_column), value);
+
                                 #ifdef INFLUX
-                                    if (strlen(metric->influx_column) > 0) {
+                                    if (allowPublish && strlen(metric->influx_column) > 0) {
                                         appendInfluxValue(&influxFields, metric->influx_column, value, true);
                                     }
                                 #endif
@@ -329,15 +330,15 @@ void parseTelegram(char* telegram)
                     }
 
                     if (strlen(metric->description) > 0) {
-                        Serial.printf("  -> %s [%s]\n", metric->description, value.c_str());
+                        Serial.printf("  -> %s [%s]\r\n", metric->description, value.c_str());
                     }
 
                     if (allowPublish && strlen(metric->topic) > 0) {
-                        Serial.printf("%s %s\n", metric->topic, value.c_str());
+                        Serial.printf("%s %s\r\n", metric->topic, value.c_str());
                         mqtt_client.publish(metric->topic, value.c_str(), true);
                     }
                 } else {
-                    Serial.printf("NOTIFY: unknown OBIS identity: %s\n", ident.c_str());
+                    Serial.printf("NOTIFY: unknown OBIS identity: %s\r\n", ident.c_str());
                 }
             }
         }
@@ -436,7 +437,7 @@ void connect_mqtt()
             Serial.println(msg);
 
         } else {
-            Serial.printf("failed, rc=%d; try again in 5 seconds", mqtt_client.state());
+            Serial.printf("failed, rc=%d; try again in 5 seconds\r\n", mqtt_client.state());
             delay(5000);  // Wait 5 seconds before retrying
         }
     }

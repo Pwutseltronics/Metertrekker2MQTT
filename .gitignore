@@ -1,4 +1,5 @@
 .pio
 .vscode
 
-settings.h
+settings*.h
+!settings.example.h
