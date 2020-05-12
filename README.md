@@ -7,7 +7,9 @@ It verifies the CRC16 of the telegram, greatly reducing the chance for errors.
 The Rx on a DSMR compliant meter is an open collector output, which means that
 the current must be supplied by the receiving device and that the resulting
 output signal is inverted. In the sketch, the Rx is inverted using SoftwareSerial,
-so no further hardware inversion is needed.
+so no hardware inversion is needed.
+
+[P1 port]: https://www.netbeheernederland.nl/_upload/Files/Slimme_meter_15_a727fce1f1.pdf
 
 ## Compatibility & Hardware
 
@@ -29,14 +31,21 @@ Assuming you have the repository files:
 2. adjust device specific firmware settings, setting defaults (if you need to)
 3. upload to your device
 4. power up device, connect to its access point
-5. configure
-6. restart device
-7. connect to meter
+5. go to captive settings portal
+6. configure
+7. restart device
+8. connect device to meter
 
 To reliably publish Influx lines to MQTT, the `MAX_PACKET_SIZE` constant in
 `PubSubClient.h` must be set to at least 1024. When using PlatformIO, *this
 will be taken care of by the included `platformio.ini`*, otherwise you must
 edit the library file.
+
+### WiFi portal
+The WiFi portal will start automatically when no configuration is present or
+when the device cannot connect to the configured WiFi network. The portal will
+also start when no telegram can be retrieved within `timeout`. This means you
+can start the portal by disconnecting the device from the P1 port.
 
 ### Note for DSMR <4.0 users
 Your meter does not include a CRC in its telegrams, this sketch will (currently)
@@ -48,6 +57,9 @@ since the firmware will not be able to compensate for transmission errors.
 
 * CRC16 library retrieved from [vinmenn/Crc16] on Github
 * [ESP-WiFiSettings] library
+
+[vinmenn/Crc16]: https://github.com/vinmenn/Crc16
+[ESP-WiFiSettings]: https://platformio.org/lib/show/7251/ESP-WiFiSettings
 
 ## Developing / contributing
 
@@ -85,9 +97,3 @@ int readLength = strlen(bufferIn);
 char receivedCRC[5] = "ECDF";
 ```
 This telegram is ESMR 5.0 compliant and the given CRC16 is valid for this telegram.
-
-
-[vinmenn/Crc16]: https://github.com/vinmenn/Crc16
-[ESP-WiFiSettings]: https://platformio.org/lib/show/7251/ESP-WiFiSettings
-
-[P1 port]: https://www.netbeheernederland.nl/_upload/Files/Slimme_meter_15_a727fce1f1.pdf
