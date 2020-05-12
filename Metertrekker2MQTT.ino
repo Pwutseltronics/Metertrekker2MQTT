@@ -31,6 +31,7 @@ SoftwareSerial P1;
     #define RTS_LOW LOW
 #endif
 
+// Send RTS signal (and set LED correspondingly)
 void set_RTS(bool s)
 {
     digitalWrite(RTS_PIN, s ? RTS_HIGH : RTS_LOW);
@@ -120,20 +121,23 @@ void loop()
         }
 
         if (millis() - lastTelegram > interval + timeout) {
-            Serial.println("Timeout, starting portal");
-            WiFiSettings.portal();
+            timeoutHandler();
         }
     } else if (P1.available() > 0)  P1.read(); // discard serial input
 }
 
-
+// Request a telegram from the meter; returns when serial data comes in
 void requestTelegram()
 {
     Serial.println("Requesting telegram...");
     set_RTS(HIGH);
 
+    unsigned long i = 0;
     Serial.print("Waiting for telegram");
+
     while (!P1.available()) {
+        if (i++ > timeout*10)  timeoutHandler();
+
         delayMicroseconds(100);
         Serial.print('.');
     }
@@ -141,6 +145,13 @@ void requestTelegram()
 }
 
 
+void timeoutHandler()
+{
+    Serial.println(F("\r\n\nTimeout, starting portal"));
+    WiFiSettings.portal();
+}
+
+// Verify a telegram using a given CRC16 code
 bool verifyTelegram(const byte* telegram, const char* checkCRC)
 {
     char calculatedCRC[5] = "";
@@ -152,7 +163,7 @@ bool verifyTelegram(const byte* telegram, const char* checkCRC)
     return strncmp(calculatedCRC, checkCRC, 4) == 0;
 }
 
-
+// Parse telegram, process contained metrics
 void parseTelegram(char* telegram)
 {
     int ln = 0;
@@ -184,7 +195,7 @@ void parseTelegram(char* telegram)
         influxGasTags.concat(',');
     #endif
 
-    Serial.print("==== START OF TELEGRAM ====\n\n");
+    Serial.print(F("==== START OF TELEGRAM ====\n\n"));
 
     lineptr = strtok(telegram, "\r\n");
     line = String(lineptr);   // TODO: need to do anything with the device model header?
@@ -195,7 +206,7 @@ void parseTelegram(char* telegram)
         line = String(lineptr);
 
         if (line.charAt(0) == '!') {
-            Serial.println("==== END OF TELEGRAM ====");
+            Serial.println(F("==== END OF TELEGRAM ===="));
 
             #ifdef INFLUX
                 // remove commas from ends of tags and fields strings
@@ -347,7 +358,7 @@ void parseTelegram(char* telegram)
 
 }
 
-// Get metric definition as defined in settings.h
+// Get metric definition for given OBIS identity as defined in settings.h
 metricDef* getMetricDef(const char* ident)
 {
     for (size_t i = 0; i < sizeof(metricDefs)/sizeof(metricDefs[0]); i++)
@@ -374,21 +385,21 @@ void appendInfluxValue(String* influxString, char* column_name, String value, bo
 void setup_wifi() {
     WiFiSettings.hostname = Sprintf("%s-%06" PRIx32, d_client_id, ESP.getChipId());
 
-    mqtt_host = WiFiSettings.string("mqtt-host", d_mqtt_host, "MQTT server host");
-    mqtt_port = WiFiSettings.integer("mqtt-port", d_mqtt_port, "MQTT server port");
-    mqtt_notify_topic = WiFiSettings.string("mqtt-notify-topic", d_notify_topic, "MQTT connect notification topic");
+    mqtt_host = WiFiSettings.string("mqtt-host", d_mqtt_host, F("MQTT server host"));
+    mqtt_port = WiFiSettings.integer("mqtt-port", d_mqtt_port, F("MQTT server port"));
+    mqtt_notify_topic = WiFiSettings.string("mqtt-notify-topic", d_notify_topic, F("MQTT connect notification topic"));
 
     #ifdef INFLUX
         influx_topic =
-            WiFiSettings.string("influx-topic", d_influx_topic, "Influx MQTT topic");
+            WiFiSettings.string("influx-topic", d_influx_topic, F("Influx MQTT topic"));
         influx_electricity_measurement =
-            WiFiSettings.string("influx-electricity-measurement", d_influx_electricity_measurement, "Influx electricity measurement");
+            WiFiSettings.string("influx-electricity-measurement", d_influx_electricity_measurement, F("Influx electricity measurement"));
         influx_gas_measurement =
-            WiFiSettings.string("influx-gas-measurement", d_influx_gas_measurement, "Influx gas measurement");
+            WiFiSettings.string("influx-gas-measurement", d_influx_gas_measurement, F("Influx gas measurement"));
     #endif
 
-    interval = WiFiSettings.integer("fetch-interval", 10, 3600, d_interval, "Measuring interval");
-    timeout = WiFiSettings.integer("fetch-timeout", 10, 120, d_timeout, "Timeout to portal");
+    interval = WiFiSettings.integer("fetch-interval", 10, 3600, d_interval, F("Measuring interval"));
+    timeout = WiFiSettings.integer("fetch-timeout", 10, 120, d_timeout, F("Timeout to portal"));
 
     interval *= 1000;   // seconds -> milliseconds
     timeout *= 1000;
@@ -411,6 +422,7 @@ void setup_wifi() {
     Serial.println(WiFiSettings.password);
 }
 
+// Set up OTA update
 void setup_ota()
 {
     ArduinoOTA.setHostname(WiFiSettings.hostname.c_str());
@@ -424,10 +436,10 @@ void connect_mqtt()
     int connLoseMillis = millis();
 
     while (!mqtt_client.connected()) {   // Loop until connected
-        Serial.print("Attempting MQTT connection...");
+        Serial.print(F("Attempting MQTT connection..."));
 
         if (mqtt_client.connect(WiFiSettings.hostname.c_str())) { // Attempt to connect
-            Serial.println("connected");
+            Serial.println(F("connected"));
 
             // Post connect message to MQTT topic once connected
             int connectMillis = millis();
