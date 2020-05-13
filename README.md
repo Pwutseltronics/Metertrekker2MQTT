@@ -1,6 +1,6 @@
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/Pwutseltronics/Metertrekker2MQTT)
-![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/Pwutseltronics/Metertrekker2MQTT/latest)
-![GitHub](https://img.shields.io/github/license/Pwutseltronics/Metertrekker2MQTT)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/Pwutseltronics/Metertrekker2MQTT)](https://github.com/Pwutseltronics/Metertrekker2MQTT/releases)
+[![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/Pwutseltronics/Metertrekker2MQTT/latest)](https://github.com/Pwutseltronics/Metertrekker2MQTT/commits)
+[![GitHub](https://img.shields.io/github/license/Pwutseltronics/Metertrekker2MQTT)](LICENSE)
 
 DSMR/ESMR telegram to MQTT pusher
 =================================
