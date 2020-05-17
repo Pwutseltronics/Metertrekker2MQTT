@@ -28,6 +28,8 @@ String mqtt_notify_topic;
 
 SoftwareSerial P1;
 
+#define Sprintf(f, ...) ({ char* s; asprintf(&s, f, __VA_ARGS__); String r = s; free(s); r; })
+
 // Send RTS signal (and set LED correspondingly)
 void set_RTS(bool s)
 {
@@ -35,11 +37,20 @@ void set_RTS(bool s)
     digitalWrite(LED_BUILTIN, !s);
 }
 
-// Declare slurp() and spurt(); definition in WiFiSettings.cpp
-String slurp(const String& fn);                         // Read file and return content
-void spurt(const String& fn, const String& content);    // Write content to file
+// Return string content from stored file
+String slurp(const String& fn) {
+    File f = LittleFS.open(fn, "r");
+    String r = f.readString();
+    f.close();
+    return r;
+}
 
-#define Sprintf(f, ...) ({ char* s; asprintf(&s, f, __VA_ARGS__); String r = s; free(s); r; })
+// Store string to file
+void spurt(const String& fn, const String& content) {
+    File f = LittleFS.open(fn, "w");
+    f.print(content);
+    f.close();
+}
 
 long lastTelegram;
 unsigned int interval;
