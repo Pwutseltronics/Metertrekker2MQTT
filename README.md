@@ -40,11 +40,6 @@ Assuming you have the repository files:
 7. restart device
 8. connect device to meter
 
-To reliably publish Influx lines to MQTT, the `MAX_PACKET_SIZE` constant in
-`PubSubClient.h` must be set to at least 1024. When using PlatformIO, *this
-will be taken care of by the included `platformio.ini`*, otherwise you must
-edit the library file.
-
 ### WiFi portal
 The WiFi portal will start automatically when no configuration is present or
 when the device cannot connect to the configured WiFi network. The portal will
@@ -61,9 +56,11 @@ since the firmware will not be able to compensate for transmission errors.
 
 * CRC16 library retrieved from [vinmenn/Crc16] on Github
 * [ESP-WiFiSettings] library
+* [arduino-mqtt] library
 
 [vinmenn/Crc16]: https://github.com/vinmenn/Crc16
 [ESP-WiFiSettings]: https://platformio.org/lib/show/7251/ESP-WiFiSettings
+[arduino-mqtt]: https://github.com/256dpi/arduino-mqtt
 
 ## Developing / contributing
 

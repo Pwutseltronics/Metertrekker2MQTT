@@ -1,8 +1,7 @@
 #include <WiFiSettings.h>
 #include <LittleFS.h>
 #include <ArduinoOTA.h>
-#include <WiFiClient.h>
-#include <PubSubClient.h>
+#include <MQTT.h>
 #include <SoftwareSerial.h>
 
 #include "Crc16.h"
@@ -10,14 +9,13 @@ Crc16 CRC;
 
 #include "settings.h"
 
-WiFiClient espClient;
-PubSubClient mqtt_client(espClient);
+WiFiClient network;
+MQTTClient mqttClient(1024);    // specify buffer size
 
 
 /* The following settings can be set in the WiFi portal but default to values in settings.h */
 
 String mqtt_host;
-int mqtt_port;
 String mqtt_topic_root;
 String mqtt_notify_topic;
 
@@ -27,6 +25,9 @@ String mqtt_notify_topic;
 
 
 SoftwareSerial P1;
+
+
+/* Helper functions/macros */
 
 #define Sprintf(f, ...) ({ char* s; asprintf(&s, f, __VA_ARGS__); String r = s; free(s); r; })
 
@@ -52,7 +53,11 @@ void spurt(const String& fn, const String& content) {
     f.close();
 }
 
-long lastTelegram;
+/* These forward declarations are not added by the Arduino preprocessor because they have default
+ * arguments (retain and qos). See https://github.com/arduino/arduino-preprocessor/issues/12 */
+bool mqtt_publish(const String &topic_path, const String &message, bool retain = true, int qos = 0);
+
+
 unsigned int interval;
 unsigned int timeout;
 
@@ -61,64 +66,65 @@ void setup()
     Serial.begin(115200);
 
     pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, HIGH);
+    pinMode(RTS_PIN, OUTPUT);
+    set_RTS(LOW);
 
     LittleFS.begin();  // Will format on the first run after failing to mount
     setup_wifi();
     setup_ota();
 
+    mqttClient.begin(mqtt_host.c_str(), network);
+    connect_mqtt();
+
     P1.begin(115200, SWSERIAL_8N1, RX_PIN, -1, true, 768);  // Tx disabled
     P1.setTimeout(50);
-
-    lastTelegram = -interval;
-
-    pinMode(RTS_PIN, OUTPUT);
-    digitalWrite(RTS_PIN, RTS_LOW);
-
-    mqtt_client.setServer(mqtt_host.c_str(), mqtt_port);
-    // mqtt_client.setCallback(callback);
 }
 
 
-char bufferIn[768];
-size_t readLength;
-char receivedCRC[5];
-
 void loop()
 {
-    ArduinoOTA.handle();
+    static bool first_telegram = true;
+    static unsigned long last_telegram_time = 0;
 
-    if (!mqtt_client.connected()) {
+    ArduinoOTA.handle();
+    mqttClient.loop();
+
+    if (!mqttClient.connected()) {
         connect_mqtt();
     }
-    mqtt_client.loop();
 
-    if (millis() - lastTelegram > interval) {
+    if (millis() - last_telegram_time > interval || first_telegram) {
         if (!P1.available())  requestTelegram();
 
         while (P1.available()) {
             if (P1.peek() == '/') {     // check for telegram header
-                readLength = P1.readBytesUntil('!', bufferIn, 766);
-                bufferIn[readLength++] = '!';
-                bufferIn[readLength] = 0;
+                char buffer_in[768];
+                size_t read_length = P1.readBytesUntil('!', buffer_in, 766);
+                buffer_in[read_length++] = '!';
+                buffer_in[read_length] = 0;
+
                 set_RTS(LOW);
 
-                Serial.printf("Telegram length: %zu\n", readLength);
+                Serial.printf("Telegram length: %zu\n", read_length);
 
-                P1.readBytes(receivedCRC, 4);
-                receivedCRC[4] = 0;
-                Serial.printf("read CRC: %s\r\n", receivedCRC);
+                char received_crc[5];
+                P1.readBytes(received_crc, 4);
+                received_crc[4] = 0;
 
-                if (verifyTelegram((byte*)bufferIn, receivedCRC)) {
+                Serial.printf("read CRC: %s\r\n", received_crc);
+
+                if (verifyTelegram((byte*)buffer_in, read_length, received_crc)) {
                     Serial.print("Telegram valid!\r\n\n");
 
-                    lastTelegram = millis();
-                    parseTelegram(bufferIn);
+                    first_telegram = false;
+                    last_telegram_time = millis();
+                    parseTelegram(buffer_in);
+
                     Serial.printf("Free heap: %zu bytes\r\n", ESP.getFreeHeap());
                 } else {
                     Serial.println("Telegram NOT valid!");
                     Serial.println("\nTELEGRAM >>>>>>");
-                    Serial.println(bufferIn);
+                    Serial.println(buffer_in);
                     Serial.print("<<<<<< TELEGRAM\r\n\n");
                     delay(400);
                 }
@@ -128,7 +134,7 @@ void loop()
             } else P1.read();
         }
 
-        if (millis() - lastTelegram > interval + timeout) {
+        if (millis() - last_telegram_time > interval + timeout) {
             timeoutHandler();
         }
     } else if (P1.available() > 0)  P1.read(); // discard serial input
@@ -160,15 +166,15 @@ void timeoutHandler()
 }
 
 // Verify a telegram using a given CRC16 code
-bool verifyTelegram(const byte* telegram, const char* checkCRC)
+bool verifyTelegram(const byte* telegram, size_t length, const char* check_crc)
 {
-    char calculatedCRC[5] = "";
+    char calculated_crc[5] = "";
 
-    sprintf(calculatedCRC, "%4X", CRC.fastCrc((uint8_t*)telegram, 0, readLength, true, true, 0x8005, 0x0000, 0x0000, 0x8000, 0xffff));
+    sprintf(calculated_crc, "%4X", CRC.fastCrc((uint8_t*)telegram, 0, length, true, true, 0x8005, 0x0000, 0x0000, 0x8000, 0xffff));
 
-    Serial.printf("calculated CRC: %s\r\n", calculatedCRC);
+    Serial.printf("calculated CRC: %s\r\n", calculated_crc);
 
-    return strncmp(calculatedCRC, checkCRC, 4) == 0;
+    return strncmp(calculated_crc, check_crc, 4) == 0;
 }
 
 // Parse telegram, process contained metrics
@@ -176,31 +182,23 @@ void parseTelegram(char* telegram)
 {
     int ln = 0;
     char *lineptr;
-    String line, ident, value, tmpValue, timestamp, gasTimestamp;
+    String line, ident, value, tmp_value, timestamp, gas_timestamp;
     bool timestampDST, gasTimestampDST;
     byte hexbuf[3];
     metricDef* metric;
-    bool allowPublish, publishGas = 0;
+    bool allow_publish, publish_gas = 0;
 
     #ifdef INFLUX
-        String influxLine;
-        influxLine.reserve(1024);
+        String influx_tags;
+        influx_tags.reserve(384);
 
-        String influxTags;
-        influxTags.reserve(384);
-        influxTags.concat(influx_electricity_measurement);
-        influxTags.concat(',');
-
-        String influxFields;
-        influxFields.reserve(640);
+        String influx_fields;
+        influx_fields.reserve(640);
 
         // separate variables for handling gas measurement
-        String influxGasLine, influxGasTags, influxGasFields;
-        influxGasLine.reserve(128);
-        influxGasTags.reserve(64);
-        influxGasFields.reserve(64);
-        influxGasTags.concat(influx_gas_measurement);
-        influxGasTags.concat(',');
+        String influx_gas_tags, influx_gas_fields;
+        influx_gas_tags.reserve(64);
+        influx_gas_fields.reserve(64);
     #endif
 
     Serial.print(F("==== START OF TELEGRAM ====\r\n\n"));
@@ -218,22 +216,16 @@ void parseTelegram(char* telegram)
 
             #ifdef INFLUX
                 // remove commas from ends of tags and fields strings
-                influxTags.remove(influxTags.length() - 1);
-                influxFields.remove(influxFields.length() - 1);
+                influx_tags.remove(influx_tags.length() - 1);
+                influx_fields.remove(influx_fields.length() - 1);
 
-                influxGasTags.remove(influxGasTags.length() - 1);
-                influxGasFields.remove(influxGasFields.length() - 1);
+                influx_gas_tags.remove(influx_gas_tags.length() - 1);
+                influx_gas_fields.remove(influx_gas_fields.length() - 1);
 
-                // post influx electricity measurement to influxTopic
-                influxLine.concat(influxTags + " " + influxFields);
-                Serial.println(influxLine);
-                mqtt_publish(influx_topic, influxLine, true);
+                influx_publish(influx_electricity_measurement, influx_fields, influx_tags);
 
-                if (publishGas) {
-                    // post influx gas measurement to influxTopic
-                    influxGasLine.concat(influxGasTags + " " + influxGasFields);
-                    Serial.println(influxGasLine);
-                    mqtt_publish(influx_topic, influxGasLine, true);
+                if (publish_gas) {
+                    influx_publish(influx_gas_measurement, influx_gas_fields, influx_gas_tags);
                 }
             #endif
 
@@ -243,41 +235,41 @@ void parseTelegram(char* telegram)
         Serial.printf("%d: %s", ++ln, line.c_str());
 
         if (line.length() >= 8) {
-            allowPublish = true;
+            allow_publish = true;
 
             if (line.lastIndexOf('(') != -1) {
                 value = line.substring(line.lastIndexOf('(') + 1, line.lastIndexOf(')'));
                 ident = line.substring(0, line.indexOf('('));
-                metric = getMetricDef(ident.c_str());
+                metric = get_metric_def(ident.c_str());
 
                 if (metric != NULL) {
                     switch (metric->type) {
                         case METRIC_TYPE_BARE:
                             #ifdef INFLUX
                                 if (strlen(metric->influx_column) > 0) {
-                                    appendInfluxValue(&influxFields, metric->influx_column, value, false);
+                                    append_influx_value(influx_fields, metric->influx_column, value, false);
                                 }
                             #endif
 
                             break;
 
                         case METRIC_TYPE_GAS:
-                            gasTimestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')'));
-                            Serial.printf("\t@{%s}\r\n", gasTimestamp.c_str());
+                            gas_timestamp = line.substring(line.indexOf('(') + 1, line.indexOf(')'));
+                            Serial.printf("\t@{%s}\r\n", gas_timestamp.c_str());
 
-                            publishGas = allowPublish = (gasTimestamp > slurp("/last-gas-timestamp"));
+                            publish_gas = allow_publish = (gas_timestamp > slurp("/last-gas-timestamp"));
 
-                            spurt("/last-gas-timestamp", gasTimestamp);
+                            spurt("/last-gas-timestamp", gas_timestamp);
 
                             value.replace("*", " ");
 
                             #ifdef INFLUX
-                                if (publishGas && strlen(metric->influx_column) > 0) {
+                                if (publish_gas && strlen(metric->influx_column) > 0) {
                                     // add gas measurement timestamp to gas measurement line
-                                    appendInfluxValue(&influxGasFields, "timestamp", gasTimestamp, true);
+                                    append_influx_value(influx_gas_fields, "timestamp", gas_timestamp, true);
 
                                     // add gas reading to gas measurement line
-                                    appendInfluxValue(&influxGasFields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
+                                    append_influx_value(influx_gas_fields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
                                 }
                             #endif
 
@@ -288,7 +280,7 @@ void parseTelegram(char* telegram)
 
                             #ifdef INFLUX
                                 if (strlen(metric->influx_column) > 0) {
-                                    appendInfluxValue(&influxFields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
+                                    append_influx_value(influx_fields, metric->influx_column, value.substring(0, value.lastIndexOf(' ')), false);
                                 }
                             #endif
 
@@ -296,24 +288,24 @@ void parseTelegram(char* telegram)
 
                         case METRIC_TYPE_TEXT:
                         case METRIC_TYPE_META_TEXT:
-                            tmpValue.reserve(value.length()/2);
+                            tmp_value.reserve(value.length()/2);
 
                             for (unsigned int i = 0; i < value.length()/2; i++) {
                                 value.substring(i*2).getBytes(hexbuf, 3);
                                 hexbuf[2] = 0;
 
-                                tmpValue.concat((char)strtol((char*)hexbuf, NULL, 16));
+                                tmp_value.concat((char)strtol((char*)hexbuf, NULL, 16));
                             }
-                            value = tmpValue;
-                            tmpValue.clear();
+                            value = tmp_value;
+                            tmp_value.clear();
 
                             if (metric->type == METRIC_TYPE_TEXT) {
-                                allowPublish = value == slurp("/last-" + String(metric->influx_column));
-                                if (allowPublish) spurt("/last-" + String(metric->influx_column), value);
+                                allow_publish = value == slurp("/last-" + String(metric->influx_column));
+                                if (allow_publish) spurt("/last-" + String(metric->influx_column), value);
 
                                 #ifdef INFLUX
-                                    if (allowPublish && strlen(metric->influx_column) > 0) {
-                                        appendInfluxValue(&influxFields, metric->influx_column, value, true);
+                                    if (allow_publish && strlen(metric->influx_column) > 0) {
+                                        append_influx_value(influx_fields, metric->influx_column, value, true);
                                     }
                                 #endif
 
@@ -325,13 +317,13 @@ void parseTelegram(char* telegram)
                             if (strcmp("0-0:1.0.0", metric->ident) == 0) { // timestamp
                                 #ifdef INFLUX
                                     if (strlen(metric->influx_column) > 0)
-                                        appendInfluxValue(&influxFields, metric->influx_column, value, true);
+                                        append_influx_value(influx_fields, metric->influx_column, value, true);
                                 #endif
 
                             } else if (strcmp("0-1:96.1.0", metric->ident) == 0) {  // gas meter serial number
                                 #ifdef INFLUX
                                     if (strlen(metric->influx_column) > 0)
-                                        appendInfluxValue(&influxGasTags, metric->influx_column, value, true);
+                                        append_influx_value(influx_gas_tags, metric->influx_column, value, true);
                                 #endif
 
                             // } else if (strcmp("1-3:0.2.8", metric->ident) == 0) { // SMR protocol version
@@ -340,7 +332,7 @@ void parseTelegram(char* telegram)
                             } else {
                                 #ifdef INFLUX
                                     if (strlen(metric->influx_column) > 0) {
-                                        appendInfluxValue(&influxTags, metric->influx_column, value, true);
+                                        append_influx_value(influx_tags, metric->influx_column, value, true);
                                     }
                                 #endif
                             }
@@ -352,9 +344,8 @@ void parseTelegram(char* telegram)
                         Serial.printf("  -> %s [%s]\r\n", metric->description, value.c_str());
                     }
 
-                    if (allowPublish && strlen(metric->mqtt_path) > 0) {
-                        Serial.printf("%s %s\r\n", metric->mqtt_path, value.c_str());
-                        mqtt_publish(metric->mqtt_path, value, true);
+                    if (allow_publish && strlen(metric->mqtt_path) > 0) {
+                        mqtt_publish(metric->mqtt_path, value);
                     }
                 } else {
                     Serial.printf("NOTIFY: unknown OBIS identity: %s\r\n", ident.c_str());
@@ -367,7 +358,7 @@ void parseTelegram(char* telegram)
 }
 
 // Get metric definition for given OBIS identity as defined in settings.h
-metricDef* getMetricDef(const char* ident)
+metricDef* get_metric_def(const char* ident)
 {
     for (size_t i = 0; i < sizeof(metricDefs)/sizeof(metricDefs[0]); i++)
     {
@@ -379,20 +370,28 @@ metricDef* getMetricDef(const char* ident)
 }
 
 // Publish a message to an MQTT topic
-bool mqtt_publish(const String topic_path, const String message, bool retain)
+bool mqtt_publish(const String &topic_path, const String &message, bool retain, int qos)
 {
-    return mqtt_client.publish((mqtt_topic_root + topic_path).c_str(), message.c_str(), retain);
+    String topic = mqtt_topic_root + topic_path;
+    Serial.printf("--> %s  %s\r\n", topic.c_str(), message.c_str());
+    return mqttClient.publish(topic, message, retain, qos);
 }
 
 #ifdef INFLUX
-// Append a metric to an influx line-format string
-void appendInfluxValue(String* influxString, char* column_name, String value, bool valueIsString)
+// Publish to the influx MQTT topic in influx format
+void influx_publish(const String &measurement, const String &fields, const String &tags)
 {
-    influxString->concat(column_name);
-    influxString->concat(valueIsString ? "=\"" + value + "\"," : '=' + value + ',');
+    String influx_line = Sprintf("%s%s%s ", measurement.c_str(), tags.length() ? "," : "", tags.c_str()) + fields;
+    mqtt_publish(influx_topic, influx_line, false, 1);
+}
+
+// Append a metric to an influx line-format string
+void append_influx_value(String &influxString, char* column_name, String value, bool valueIsString)
+{
+    influxString.concat(column_name);
+    influxString.concat(valueIsString ? "=\"" + value + "\"," : '=' + value + ',');
 }
 #endif
-
 
 // WiFi and MQTT setup functions
 
@@ -400,7 +399,6 @@ void setup_wifi() {
     WiFiSettings.hostname = Sprintf("%s-%06" PRIx32, client_id, ESP.getChipId());
 
     mqtt_host = WiFiSettings.string("mqtt-host", d_mqtt_host, F("MQTT server host"));
-    mqtt_port = WiFiSettings.integer("mqtt-port", d_mqtt_port, F("MQTT server port"));
     mqtt_topic_root = WiFiSettings.string("mqtt-root", d_mqtt_topic_root, F("MQTT topic root"));
     mqtt_notify_topic = WiFiSettings.string("mqtt-notify-topic", d_notify_topic, F("MQTT connect notification topic"));
 
@@ -447,25 +445,21 @@ void setup_ota()
 
 void connect_mqtt()
 {
-    char msg[50];
-    int connLoseMillis = millis();
+    unsigned long connection_lose_time = millis();
 
-    while (!mqtt_client.connected()) {   // Loop until connected
-        Serial.print(F("Attempting MQTT connection..."));
+    Serial.print(F("Attempting MQTT connection..."));
+    while (!mqttClient.connect(WiFiSettings.hostname.c_str())) {   // Loop until connected
+        Serial.print('.');
+        delay(500);
 
-        if (mqtt_client.connect(WiFiSettings.hostname.c_str())) { // Attempt to connect
-            Serial.println(F("connected"));
-
-            // Post connect message to MQTT topic once connected
-            int connectMillis = millis();
-            float lostSeconds = (connectMillis - connLoseMillis) / 1000;
-            sprintf(msg, "%s (re)connected after %.1fs", WiFiSettings.hostname.c_str(), lostSeconds);
-            mqtt_publish(mqtt_notify_topic, msg, false);
-            Serial.println(msg);
-
-        } else {
-            Serial.printf("failed, rc=%d; try again in 5 seconds\r\n", mqtt_client.state());
-            delay(5000);  // Wait 5 seconds before retrying
-        }
+        // start portal after 30 seconds without connectivity
+        if (millis() - connection_lose_time > 30e3) WiFiSettings.portal();
     }
+    Serial.println();
+
+    String message = Sprintf("%s (re)connected after %.1fs", WiFiSettings.hostname.c_str(), (millis() - connection_lose_time) / 1000.0);
+
+    // Post connect message to MQTT topic once connected
+    mqtt_publish(mqtt_notify_topic, message, false);
+    Serial.println();
 }

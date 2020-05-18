@@ -2,7 +2,6 @@
 
 /* MQTT stuff */
 const char* d_mqtt_host  = "MQTT_SERV_IP";          // default MQTT host
-const int   d_mqtt_port  = 1883;                    // default MQTT port
 const char* d_mqtt_topic_root = "my_mqtt_root";     // default MQTT topic root
 const char* d_notify_topic = "/debug/node_connect"; // default MQTT topic for  messages regarding connection status
 
