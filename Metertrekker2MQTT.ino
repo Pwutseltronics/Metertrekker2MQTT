@@ -61,6 +61,8 @@ bool mqtt_publish(const String &topic_path, const String &message, bool retain =
 unsigned int interval;
 unsigned int timeout;
 
+int dsmr_version = -1;
+
 void setup()
 {
     Serial.begin(115200);
@@ -107,14 +109,21 @@ void loop()
 
                 Serial.printf("Telegram length: %zu\n", read_length);
 
-                char received_crc[5];
-                P1.readBytes(received_crc, 4);
-                received_crc[4] = 0;
+                bool telegram_valid;
+                if (dsmr_version >= 42) {   // before DSMR 4.2, telegrams did not contain a CRC tag at the end
+                    char received_crc[5];
+                    P1.readBytes(received_crc, 4);
+                    received_crc[4] = 0;
 
-                Serial.printf("read CRC: %s\r\n", received_crc);
+                    Serial.printf("read CRC: %s\r\n", received_crc);
 
-                if (verifyTelegram((byte*)buffer_in, read_length, received_crc)) {
-                    Serial.print("Telegram valid!\r\n\n");
+                    telegram_valid = crcVerifyTelegram((byte*)buffer_in, read_length, received_crc);
+                } else {
+                    telegram_valid = bracketVerifyTelegram(buffer_in, read_length);
+                }
+
+                if (telegram_valid) {
+                    if (dsmr_version >= 42) Serial.print("Telegram valid!\r\n\n");  // can't be so sure from just counting the brackets (< DSMR 4.2)
 
                     first_telegram = false;
                     last_telegram_time = millis();
@@ -166,7 +175,7 @@ void timeoutHandler()
 }
 
 // Verify a telegram using a given CRC16 code
-bool verifyTelegram(const byte* telegram, size_t length, const char* check_crc)
+bool crcVerifyTelegram(const byte* telegram, size_t length, const char* check_crc)
 {
     char calculated_crc[5] = "";
 
@@ -175,6 +184,24 @@ bool verifyTelegram(const byte* telegram, size_t length, const char* check_crc)
     Serial.printf("calculated CRC: %s\r\n", calculated_crc);
 
     return strncmp(calculated_crc, check_crc, 4) == 0;
+}
+
+bool bracketVerifyTelegram(const char* telegram, size_t length)
+{
+    int counter = 0;
+    for (size_t i = 0; i < length; i++)
+    {
+        switch (telegram[i]) {
+            case '(':
+                counter++;
+                break;
+            case ')':
+                counter--;
+                break;
+        }
+    }
+
+    return counter == 0;
 }
 
 // Parse telegram, process contained metrics
@@ -314,7 +341,10 @@ void parseTelegram(char* telegram)
 
                         case METRIC_TYPE_META:
 
-                            if (strcmp("0-0:1.0.0", metric->ident) == 0) { // timestamp
+                            if (strcmp("1-3:0.2.8", metric->ident) == 0) { // SMR protocol version
+                                dsmr_version = value.toInt();
+
+                            } else if (strcmp("0-0:1.0.0", metric->ident) == 0) { // timestamp
                                 #ifdef INFLUX
                                     if (strlen(metric->influx_column) > 0)
                                         append_influx_value(influx_fields, metric->influx_column, value, true);
@@ -326,13 +356,10 @@ void parseTelegram(char* telegram)
                                         append_influx_value(influx_gas_tags, metric->influx_column, value, true);
                                 #endif
 
-                            // } else if (strcmp("1-3:0.2.8", metric->ident) == 0) { // SMR protocol version
-                            //   //TODO: use this value to adjust protocol handling
-
                             } else {
                                 #ifdef INFLUX
                                     if (strlen(metric->influx_column) > 0) {
-                                        append_influx_value(influx_tags, metric->influx_column, value, true);
+                                        append_influx_value(influx_tags, metric->influx_column, value, false);  // no quotes around tag values!
                                     }
                                 #endif
                             }
