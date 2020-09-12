@@ -47,10 +47,9 @@ also start when no telegram can be retrieved within `timeout`. This means you
 can start the portal by disconnecting the device from the P1 port.
 
 ### Note for DSMR <4.0 users
-Your meter does not include a CRC in its telegrams, this sketch will (currently)
-not work with your meter. You can manually disable the verification code, but
-keep in mind that you may get garbage data out of it and it may also crash,
-since the firmware will not be able to compensate for transmission errors.
+Your meter does not include a CRC in its telegrams.
+This sketch will attempt to filter out large errors by pair-checking the brackets in the telegram, but keep in mind that you may get faulty data,
+since the firmware will not be able to compensate for most transmission errors.
 
 ## Dependencies
 
