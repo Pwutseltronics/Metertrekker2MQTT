@@ -110,7 +110,7 @@ void loop()
                 Serial.printf("Telegram length: %zu\n", read_length);
 
                 bool telegram_valid;
-                if (dsmr_version >= 42) {   // before DSMR 4.2, telegrams did not contain a CRC tag at the end
+                if (dsmr_version >= 40) {   // before DSMR 4.0, telegrams did not contain a CRC tag at the end
                     char received_crc[5];
                     P1.readBytes(received_crc, 4);
                     received_crc[4] = 0;
@@ -123,7 +123,7 @@ void loop()
                 }
 
                 if (telegram_valid) {
-                    if (dsmr_version >= 42) Serial.print("Telegram valid!\r\n\n");  // can't be so sure from just counting the brackets (< DSMR 4.2)
+                    if (dsmr_version >= 40) Serial.print("Telegram valid!\r\n\n");  // can't be so sure from just counting the brackets (< DSMR 4.0)
 
                     first_telegram = false;
                     last_telegram_time = millis();
