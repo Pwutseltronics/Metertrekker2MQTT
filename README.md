@@ -13,6 +13,10 @@ the current must be supplied by the receiving device and that the resulting
 output signal is inverted. In the sketch, the Rx is inverted using SoftwareSerial,
 so no hardware inversion is needed.
 
+## Graphs
+
+To get nice graphs out of it, check my [Metergrafiekjes docker configuration]!
+
 [P1 port]: https://www.netbeheernederland.nl/_upload/Files/Slimme_meter_15_a727fce1f1.pdf
 
 ## Compatibility & Hardware
@@ -39,6 +43,10 @@ Assuming you have the repository files:
 6. configure
 7. restart device
 8. connect device to meter
+
+If you are planning to also use the [Metergrafiekjes docker configuration], please set that up first, so that when configuring the Metertrekker, you will know the address of the MQTT server.
+
+[Metergrafiekjes docker configuration]: https://github.com/Pwutseltronics/Metergrafiekjes-docker-compose
 
 ### WiFi portal
 The WiFi portal will start automatically when no configuration is present or
