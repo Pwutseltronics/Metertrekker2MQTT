@@ -2,14 +2,14 @@
 
 /* MQTT stuff */
 const char* d_mqtt_host  = "MQTT_SERV_IP";          // default MQTT host
-const char* d_mqtt_topic_root = "my_mqtt_root";     // default MQTT topic root
+const char* d_mqtt_topic_root = "pwutseltronics";   // default MQTT topic root
 const char* d_notify_topic = "/debug/node_connect"; // default MQTT topic for  messages regarding connection status
 
 /* Influx stuff */
 #define INFLUX   // if defined, Influx related functionality is enabled
 
 #ifdef INFLUX
-  const char* d_influx_topic = "/energy/influx";                // default MQTT topic the influx lines will be published to
+  const char* d_influx_topic = "/influx/metertrekker";          // default MQTT topic the influx lines will be published to
   const char* d_influx_electricity_measurement = "electricity"; // default Influx measurement name for electricity data
   const char* d_influx_gas_measurement = "gas";                 // default Influx measurement name for gas data
 #endif
